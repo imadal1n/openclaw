@@ -122,7 +122,10 @@ function loadCompletedSubagentResultsFromDisk(now = Date.now()): Map<string, Sub
       }
       const retentionBase =
         typeof entry.cleanupCompletedAt === "number" ? entry.cleanupCompletedAt : entry.endedAt;
-      if (now - retentionBase > COMPLETED_SUBAGENT_RESULTS_RETENTION_MS) {
+      if (
+        typeof retentionBase !== "number" ||
+        now - retentionBase > COMPLETED_SUBAGENT_RESULTS_RETENTION_MS
+      ) {
         continue;
       }
       out.set(runId, structuredClone(entry));
