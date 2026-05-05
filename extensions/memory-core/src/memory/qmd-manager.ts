@@ -602,6 +602,17 @@ export class QmdMemoryManager implements MemorySearchManager {
         log.warn(`qmd collection add failed for ${collection.name}: ${message}`);
       }
     }
+
+    // Write deterministic index.yml for host-side QMD adapter compatibility
+    const configDir = path.join(this.xdgConfigHome, "qmd");
+    await fs.mkdir(configDir, { recursive: true });
+    const lines = ["collections:"];
+    for (const collection of this.qmd.collections) {
+      lines.push(`  ${collection.name}:`);
+      lines.push(`    path: ${collection.path}`);
+      lines.push(`    pattern: ${JSON.stringify(collection.pattern)}`);
+    }
+    await fs.writeFile(path.join(configDir, "index.yml"), lines.join("\n") + "\n", "utf8");
   }
 
   private async tryRebindSameNameCollection(params: {
@@ -1084,24 +1095,7 @@ export class QmdMemoryManager implements MemorySearchManager {
   }
 
   private async rebuildManagedCollectionsForRepair(reason: string): Promise<void> {
-    for (const collection of this.qmd.collections) {
-      try {
-        await this.removeCollection(collection.name);
-      } catch (removeErr) {
-        const removeMessage = formatErrorMessage(removeErr);
-        if (!this.isCollectionMissingError(removeMessage)) {
-          log.warn(`qmd collection remove failed for ${collection.name}: ${removeMessage}`);
-        }
-      }
-      try {
-        await this.addCollection(collection.path, collection.name, collection.pattern);
-      } catch (addErr) {
-        const addMessage = formatErrorMessage(addErr);
-        if (!this.isCollectionAlreadyExistsError(addMessage)) {
-          log.warn(`qmd collection add failed for ${collection.name}: ${addMessage}`);
-        }
-      }
-    }
+    await this.ensureCollections();
     log.warn(`qmd managed collections rebuilt for update repair (${reason})`);
   }
 
