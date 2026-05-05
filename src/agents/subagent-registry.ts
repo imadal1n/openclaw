@@ -78,6 +78,7 @@ import {
   persistSubagentRunsToDisk,
   persistSubagentRunsToDiskOrThrow,
   restoreSubagentRunsFromDisk,
+  saveCompletedSubagentRunToDisk,
 } from "./subagent-registry-state.js";
 import { configureSubagentRegistrySteerRuntime } from "./subagent-registry-steer-runtime.js";
 import type { SubagentRunRecord } from "./subagent-registry.types.js";
@@ -119,6 +120,7 @@ type SubagentRegistryDeps = {
   persistSubagentRunsToDiskOrThrow: typeof persistSubagentRunsToDiskOrThrow;
   resolveAgentTimeoutMs: typeof resolveAgentTimeoutMs;
   restoreSubagentRunsFromDisk: typeof restoreSubagentRunsFromDisk;
+  saveCompletedSubagentRunToDisk: typeof saveCompletedSubagentRunToDisk;
   runSubagentAnnounceFlow: SubagentAnnounceModule["runSubagentAnnounceFlow"];
   ensureContextEnginesInitialized?: () => void;
   ensureRuntimePluginsLoaded?: typeof ensureRuntimePluginsLoadedFn;
@@ -158,6 +160,7 @@ const defaultSubagentRegistryDeps: SubagentRegistryDeps = {
   persistSubagentRunsToDiskOrThrow,
   resolveAgentTimeoutMs,
   restoreSubagentRunsFromDisk,
+  saveCompletedSubagentRunToDisk,
   runSubagentAnnounceFlow: async (params) =>
     (await loadSubagentAnnounceModule()).runSubagentAnnounceFlow(params),
 };
@@ -587,6 +590,8 @@ const subagentLifecycleController = createSubagentRegistryLifecycleController({
   resumedRuns,
   subagentAnnounceTimeoutMs: SUBAGENT_ANNOUNCE_TIMEOUT_MS,
   persist: persistSubagentRuns,
+  saveCompletedSubagentRunToDisk: (entry) =>
+    subagentRegistryDeps.saveCompletedSubagentRunToDisk(entry),
   clearPendingLifecycleError,
   countPendingDescendantRuns,
   suppressAnnounceForSteerRestart,
