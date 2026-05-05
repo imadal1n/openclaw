@@ -122,6 +122,7 @@ export function createSubagentRegistryLifecycleController(params: {
   resumedRuns: Set<string>;
   subagentAnnounceTimeoutMs: number;
   persist(): void;
+  saveCompletedSubagentRunToDisk(entry: SubagentRunRecord): void;
   clearPendingLifecycleError(runId: string): void;
   countPendingDescendantRuns(rootSessionKey: string): number;
   suppressAnnounceForSteerRestart(entry?: SubagentRunRecord): boolean;
@@ -1208,6 +1209,7 @@ export function createSubagentRegistryLifecycleController(params: {
     if (mutated) {
       params.persist();
     }
+    params.saveCompletedSubagentRunToDisk(entry);
     safeFinalizeSubagentTaskRun({
       entry,
       outcome,
