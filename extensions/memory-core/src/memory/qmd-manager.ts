@@ -606,7 +606,10 @@ export class QmdMemoryManager implements MemorySearchManager {
     this.collectionRoots.clear();
     this.sources.clear();
     for (const collection of this.qmd.collections) {
-      const kind: MemorySource = collection.kind === "sessions" ? "sessions" : "memory";
+      const kind: MemorySource =
+        collection.kind === "sessions" || collection.name === "sessions-main"
+          ? "sessions"
+          : "memory";
       this.collectionRoots.set(collection.name, { path: collection.path, kind });
       this.sources.add(kind);
     }
