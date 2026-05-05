@@ -2,12 +2,11 @@
 import path from "node:path";
 import { asNullableRecord } from "@openclaw/normalization-core/record-coerce";
 import {
-  lowercasePreservingWhitespace,
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalLowercaseString,
   normalizeStringifiedOptionalString,
 } from "@openclaw/normalization-core/string-coerce";
-import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../agents/agent-scope.js";
+import { resolveAgentWorkspaceDir } from "../agents/agent-scope.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 
 export const DEFAULT_MEMORY_DREAMING_ENABLED = false;
@@ -323,11 +322,6 @@ function resolveExecutionConfig(
   };
 }
 
-function normalizePathForComparison(input: string): string {
-  const normalized = path.resolve(input);
-  return process.platform === "win32" ? lowercasePreservingWhitespace(normalized) : normalized;
-}
-
 function formatLocalIsoDay(epochMs: number): string {
   const date = new Date(epochMs);
   const year = date.getFullYear();
@@ -619,48 +613,11 @@ export function resolveMemoryDreamingWorkspaces(
   cfg: OpenClawConfig,
   options: MemoryDreamingWorkspaceOptions = {},
 ): MemoryDreamingWorkspace[] {
-  const configured = Array.isArray(cfg.agents?.list) ? cfg.agents.list : [];
-  const agentIds: string[] = [];
-  const seenAgents = new Set<string>();
-  for (const entry of configured) {
-    if (!entry || typeof entry !== "object" || typeof entry.id !== "string") {
-      continue;
-    }
-    const id = normalizeOptionalLowercaseString(entry.id);
-    if (!id || seenAgents.has(id)) {
-      continue;
-    }
-    seenAgents.add(id);
-    agentIds.push(id);
+  void options;
+  const agentId = "main";
+  const workspaceDir = resolveAgentWorkspaceDir(cfg, agentId)?.trim();
+  if (!workspaceDir) {
+    return [];
   }
-  if (agentIds.length === 0) {
-    agentIds.push(resolveDefaultAgentId(cfg));
-  }
-
-  const byWorkspace = new Map<string, MemoryDreamingWorkspace>();
-  const addWorkspace = (workspaceDirRaw: string | undefined, agentIdRaw: string): void => {
-    const workspaceDir = workspaceDirRaw?.trim();
-    if (!workspaceDir) {
-      return;
-    }
-    const agentId = normalizeOptionalLowercaseString(agentIdRaw) || resolveDefaultAgentId(cfg);
-    const key = normalizePathForComparison(workspaceDir);
-    const existing = byWorkspace.get(key);
-    if (existing) {
-      if (!existing.agentIds.includes(agentId)) {
-        existing.agentIds.push(agentId);
-      }
-      return;
-    }
-    byWorkspace.set(key, { workspaceDir, agentIds: [agentId] });
-  };
-
-  for (const agentId of agentIds) {
-    addWorkspace(resolveAgentWorkspaceDir(cfg, agentId, options.env), agentId);
-  }
-  addWorkspace(
-    options.primaryWorkspaceDir ?? undefined,
-    options.primaryAgentId ?? resolveDefaultAgentId(cfg),
-  );
-  return [...byWorkspace.values()];
+  return [{ workspaceDir, agentIds: [agentId] }];
 }
