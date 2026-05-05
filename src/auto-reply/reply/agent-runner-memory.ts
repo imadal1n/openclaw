@@ -1197,6 +1197,8 @@ export async function runMemoryFlushIfNeeded(params: {
     workspaceDir: params.followupRun.run.workspaceDir,
     relativePath: memoryFlushWritePath,
   });
+  const memoryFlushScratchSessionId = `memory-flush-${flushRunId}`;
+  const memoryFlushScratchSessionFile = `/tmp/openclaw-memory-flush-${flushRunId}.jsonl`;
   const flushSystemPrompt = [
     params.followupRun.run.extraSystemPrompt,
     activeMemoryFlushPlan.systemPrompt,
@@ -1213,7 +1215,7 @@ export async function runMemoryFlushIfNeeded(params: {
         params.cfg,
       ),
       runId: flushRunId,
-      sessionId: activeSessionEntry?.sessionId ?? params.followupRun.run.sessionId,
+      sessionId: memoryFlushScratchSessionId,
       lane: CommandLane.Main,
       abortSignal: params.replyOperation.abortSignal,
       resolveAgentHarnessRuntimeOverride: (provider) =>
@@ -1249,6 +1251,10 @@ export async function runMemoryFlushIfNeeded(params: {
           ...embeddedContext,
           ...senderContext,
           ...runBaseParams,
+          sessionId: memoryFlushScratchSessionId,
+          sessionFile: memoryFlushScratchSessionFile,
+          messageThreadId: undefined,
+          currentMessageId: undefined,
           sandboxSessionKey: params.runtimePolicySessionKey,
           allowGatewaySubagentBinding: true,
           silentExpected: true,
@@ -1287,6 +1293,8 @@ export async function runMemoryFlushIfNeeded(params: {
         return result;
       },
     });
+    const flushedCompactionCount =
+    memoryCompactionCompleted = false;
     const flushedCompactionCount =
       activeSessionEntry?.compactionCount ??
       (params.sessionKey ? activeSessionStore?.[params.sessionKey]?.compactionCount : 0) ??
