@@ -149,7 +149,7 @@ describe("memory dreaming host helpers", () => {
     expect(resolved.phases.rem.cron).toBe("15 */8 * * *");
   });
 
-  it("dedupes shared workspaces across all configured agents", () => {
+  it("uses only the configured main workspace for Sona dreaming", () => {
     const cfg = {
       agents: {
         list: [
@@ -162,17 +162,13 @@ describe("memory dreaming host helpers", () => {
 
     expect(resolveMemoryDreamingWorkspaces(cfg)).toEqual([
       {
-        workspaceDir: "/workspace/shared",
-        agentIds: ["alpha", "gamma"],
-      },
-      {
-        workspaceDir: "/workspace/beta",
-        agentIds: ["beta"],
+        workspaceDir: "/home/limax/.openclaw/workspace-main",
+        agentIds: ["main"],
       },
     ]);
   });
 
-  it("includes the runtime primary workspace alongside configured subagent workspaces", () => {
+  it("ignores runtime primary workspace overrides for Sona dreaming", () => {
     const cfg = {
       agents: {
         list: [
@@ -189,15 +185,7 @@ describe("memory dreaming host helpers", () => {
       }),
     ).toEqual([
       {
-        workspaceDir: "/workspace/agi-ceo",
-        agentIds: ["agi-ceo"],
-      },
-      {
-        workspaceDir: "/workspace/agi-cdo",
-        agentIds: ["agi-cdo"],
-      },
-      {
-        workspaceDir: "/workspace/main",
+        workspaceDir: "/home/limax/.openclaw/workspace-main",
         agentIds: ["main"],
       },
     ]);
