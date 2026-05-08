@@ -320,6 +320,35 @@ describe("searchMemoryWiki", () => {
     expect(results[0]?.snippet).toContain("Teams");
   });
 
+  it("keeps all-token wiki matches in the compiled digest prefilter", async () => {
+    const { rootDir, config } = await createQueryVault({
+      initialize: true,
+    });
+    await fs.writeFile(
+      path.join(rootDir, "entities", "regatta.md"),
+      renderWikiMarkdown({
+        frontmatter: {
+          pageType: "entity",
+          id: "entity.regatta",
+          title: "Regatta Memory",
+          sourceIds: ["source.medals"],
+        },
+        body: "# Regatta Memory\n\nDaily notes mention medaliile won at several regate.",
+      }),
+      "utf8",
+    );
+    await compileMemoryWikiVault(config);
+
+    const results = await searchMemoryWiki({
+      config,
+      query: "medaliile regate",
+      maxResults: 10,
+    });
+
+    expect(results.map((result) => result.path)).toEqual(["entities/regatta.md"]);
+    expect(results[0]?.snippet).toContain("regate");
+  });
+
   it("supports people-routing search modes and claim evidence drilldown metadata", async () => {
     const { rootDir, config } = await createQueryVault({
       initialize: true,

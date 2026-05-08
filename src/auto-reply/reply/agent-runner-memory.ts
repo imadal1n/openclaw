@@ -1395,8 +1395,6 @@ export async function runMemoryFlushIfNeeded(params: {
       },
     });
     const flushedCompactionCount =
-    memoryCompactionCompleted = false;
-    const flushedCompactionCount =
       activeSessionEntry?.compactionCount ??
       (params.sessionKey ? activeSessionStore?.[params.sessionKey]?.compactionCount : 0) ??
       0;
