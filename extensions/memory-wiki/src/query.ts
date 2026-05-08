@@ -802,8 +802,11 @@ function buildDigestCandidatePaths(params: {
       const metadataLower = normalizeLowercaseStringOrEmpty(
         buildDigestPageSearchText(page, claims),
       );
+      const hasAllTokens =
+        queryTokens.length > 0 && queryTokens.every((token) => metadataLower.includes(token));
       if (
         !metadataLower.includes(queryLower) &&
+        !hasAllTokens &&
         !(
           params.mode === "route-question" &&
           hasRouteQuestionMatch(buildDigestRouteQuestionFields(page), queryLower)
@@ -820,6 +823,9 @@ function buildDigestCandidatePaths(params: {
           sourceIds: page.sourceIds,
           queryLower,
         });
+      if (hasAllTokens) {
+        score += 12;
+      }
       const matchingClaims = claims
         .filter((claim) => isClaimTextOrIdMatch(claim, queryLower, queryTokens))
         .toSorted(
