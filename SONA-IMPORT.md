@@ -14,10 +14,12 @@ Imports are local/Gitea-first. They prepare `sona-dev`; they do not deploy anyth
 2. Create import branch from `sona-dev`: `git checkout -b import/<version> sona-dev`.
 3. Rebase Sona patches onto the new upstream tag: `git rebase v<version>`.
 4. Resolve conflicts per patch using `SONA-PATCH-MIGRATION.md`.
-5. Build and run quarantine gates against safe lab inputs.
-6. Record result: `promoted`, `hold`, or `superseded`.
-7. If promoted, follow `SONA-PROMOTION.md` and push only to `gitea`.
-8. If held, document blockers in the appropriate infra change note.
+5. Verify the carried stack with `git range-diff old-upstream..old-sona-dev new-upstream..import/<version>` and account for every current Sona patch.
+6. Carry forward tests as well as runtime code. If a failing test encodes upstream-default behavior that Sona intentionally customizes, update the expectation in the import branch. If upstream supersedes a patch, adapt or drop the patch with evidence instead.
+7. Build and run quarantine gates against safe lab inputs.
+8. Record result: `promoted`, `hold`, or `superseded`.
+9. If promoted, follow `SONA-PROMOTION.md` and push only to `gitea`.
+10. If held, document blockers in the appropriate infra change note.
 
 ## Rebase Model
 

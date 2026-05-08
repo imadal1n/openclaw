@@ -193,6 +193,7 @@ function createLifecycleController({
       (await gatewayMocks.callGateway(opts)) as T,
     captureSubagentCompletionReply: vi.fn(async () => "final completion reply"),
     runSubagentAnnounceFlow: vi.fn(async () => true),
+    saveCompletedSubagentRunToDisk: vi.fn(async () => {}),
     warn: vi.fn(),
   };
   Object.assign(params, overrides);
