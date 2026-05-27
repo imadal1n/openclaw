@@ -208,6 +208,13 @@ describe("plugin-sdk/approval-reaction-runtime", () => {
         expiresAtMs: 61_000,
         actions: [
           {
+            kind: "command",
+            label: "Verify once",
+            command: "/agentkit approve plugin:agentkit allow-once",
+            style: "success",
+          },
+          {
+            kind: "decision",
             decision: "deny",
             label: "Deny",
             command: "/approve plugin:agentkit deny",
@@ -218,6 +225,7 @@ describe("plugin-sdk/approval-reaction-runtime", () => {
       nowMs: 1_000,
     });
 
+    expect(payload.text).toContain("Verify once: /agentkit approve plugin:agentkit allow-once");
     expect(payload.text).toContain("Deny: /approve plugin:agentkit deny");
     expect(payload.text).toContain("/approve plugin:agentkit deny");
     expect(payload.text).toContain("👎 Deny");
