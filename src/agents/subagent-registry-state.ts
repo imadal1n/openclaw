@@ -86,16 +86,42 @@ function isCompletedSubagentRunEntry(entry: unknown): entry is SubagentRunRecord
 
 function trimCompletedSubagentResult(entry: SubagentRunRecord): SubagentRunRecord {
   const cloned = structuredClone(entry);
-  const completion = cloned.completion;
-  if (
-    typeof completion?.resultText === "string" &&
-    Buffer.byteLength(completion.resultText, "utf8") > COMPLETED_SUBAGENT_RESULT_TEXT_MAX_BYTES
-  ) {
-    let text = completion.resultText;
+  const truncateResultText = (value: string): string => {
+    let text = value;
     while (Buffer.byteLength(text, "utf8") > COMPLETED_SUBAGENT_RESULT_TEXT_MAX_BYTES) {
       text = text.slice(0, Math.max(0, text.length - 1024));
     }
-    completion.resultText = `${text}\n[truncated by completed subagent result persistence]`;
+    return `${text}\n[truncated by completed subagent result persistence]`;
+  };
+
+  const completionText = cloned.completion?.resultText;
+  if (
+    typeof completionText === "string" &&
+    Buffer.byteLength(completionText, "utf8") > COMPLETED_SUBAGENT_RESULT_TEXT_MAX_BYTES
+  ) {
+    if (cloned.completion) {
+      cloned.completion.resultText = truncateResultText(completionText);
+    }
+  }
+
+  const deliveryText = cloned.delivery?.payload?.frozenResultText;
+  if (
+    typeof deliveryText === "string" &&
+    Buffer.byteLength(deliveryText, "utf8") > COMPLETED_SUBAGENT_RESULT_TEXT_MAX_BYTES
+  ) {
+    if (cloned.delivery?.payload) {
+      cloned.delivery.payload.frozenResultText = truncateResultText(deliveryText);
+    }
+  }
+
+  const fallbackDeliveryText = cloned.delivery?.payload?.fallbackFrozenResultText;
+  if (
+    typeof fallbackDeliveryText === "string" &&
+    Buffer.byteLength(fallbackDeliveryText, "utf8") > COMPLETED_SUBAGENT_RESULT_TEXT_MAX_BYTES
+  ) {
+    if (cloned.delivery?.payload) {
+      cloned.delivery.payload.fallbackFrozenResultText = truncateResultText(fallbackDeliveryText);
+    }
   }
   return cloned;
 }
