@@ -830,7 +830,7 @@ describe("memory-core dreaming phases", () => {
     ).toBe(true);
   });
 
-  it("does not ingest top-level memory files when Sona source selection limits dreaming to memory/daily", async () => {
+  it("prioritizes the date-only daily file before same-day slugged files when ingestion is capped", async () => {
     const workspaceDir = await createDreamingWorkspace();
     await fs.writeFile(
       path.join(workspaceDir, "memory", "2026-04-05.md"),
@@ -880,8 +880,8 @@ describe("memory-core dreaming phases", () => {
       minUniqueQueries: 0,
       nowMs: Date.parse("2026-04-05T10:05:00.000Z"),
     });
-    expect(after.some((entry) => entry.path === "memory/2026-04-05.md")).toBe(false);
-    expect(after.some((entry) => entry.snippet.includes("Canonical daily note"))).toBe(false);
+    expect(after.some((entry) => entry.path === "memory/2026-04-05.md")).toBe(true);
+    expect(after.some((entry) => entry.snippet.includes("Canonical daily note"))).toBe(true);
   });
 
   it("prioritizes the date-only daily file before same-day slugged files during historical seeding", async () => {
