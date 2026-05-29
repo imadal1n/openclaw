@@ -42,6 +42,7 @@ const DREAMING_MEMORY_PATH_RE = /(?:^|\/)memory\/dreaming\//;
 const SHORT_TERM_SESSION_CORPUS_RE =
   /(?:^|\/)memory\/\.dreams\/session-corpus\/(\d{4})-(\d{2})-(\d{2})\.(?:md|txt)$/;
 const SHORT_TERM_BASENAME_RE = /^(\d{4})-(\d{2})-(\d{2})(?:-[^/]+)?\.md$/;
+const DREAMING_DAILY_SIGNAL_PATH_RE = /(?:^|\/)memory\/(?!\.dreams\/)(?!dreaming\/).+\.md$/;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_RECENCY_HALF_LIFE_DAYS = 14;
 export const DEFAULT_PROMOTION_MIN_SCORE = 0.75;
@@ -1318,6 +1319,14 @@ export async function loadShortTermPromotionDreamingStats(params: {
   };
 }
 
+export function isDreamingDailySignalPath(filePath: string): boolean {
+  const normalized = normalizeMemoryPath(filePath);
+  if (DREAMING_MEMORY_PATH_RE.test(normalized)) {
+    return false;
+  }
+  return DREAMING_DAILY_SIGNAL_PATH_RE.test(normalized);
+}
+
 async function shortTermRecallSourceExists(params: {
   workspaceDir: string;
   entry: Pick<ShortTermRecallEntry, "path">;
@@ -1373,8 +1382,12 @@ export async function recordShortTermRecalls(params: {
   if (!query) {
     return;
   }
+  const signalType = params.signalType ?? "recall";
   const relevant = params.results.filter(
-    (result) => result.source === "memory" && isShortTermMemoryPath(result.path),
+    (result) =>
+      result.source === "memory" &&
+      (isShortTermMemoryPath(result.path) ||
+        (signalType === "daily" && isDreamingDailySignalPath(result.path))),
   );
   if (relevant.length === 0) {
     return;
@@ -1382,7 +1395,6 @@ export async function recordShortTermRecalls(params: {
 
   const nowMs = resolveMemoryCoreNowMs(params.nowMs);
   const nowIso = resolveMemoryCoreTimestamp(nowMs);
-  const signalType = params.signalType ?? "recall";
   const queryHash = hashQuery(query);
   const todayBucket =
     normalizeIsoDay(params.dayBucket ?? "") ?? formatMemoryDreamingDay(nowMs, params.timezone);
@@ -1504,7 +1516,7 @@ export async function recordGroundedShortTermCandidates(params: {
         !rawSnippet ||
         isContaminatedDreamingSnippet(rawSnippet) ||
         !normalizedPath ||
-        !isShortTermMemoryPath(normalizedPath) ||
+        (!isShortTermMemoryPath(normalizedPath) && !isDreamingDailySignalPath(normalizedPath)) ||
         !Number.isFinite(item.startLine) ||
         !Number.isFinite(item.endLine)
       ) {
@@ -1763,7 +1775,11 @@ export async function rankShortTermPromotionCandidates(
   const candidates: PromotionCandidate[] = [];
 
   for (const entry of Object.values(store.entries)) {
-    if (!entry || entry.source !== "memory" || !isShortTermMemoryPath(entry.path)) {
+    if (
+      !entry ||
+      entry.source !== "memory" ||
+      (!isShortTermMemoryPath(entry.path) && !isDreamingDailySignalPath(entry.path))
+    ) {
       continue;
     }
     if (isContaminatedDreamingSnippet(entry.snippet)) {
@@ -1883,7 +1899,9 @@ export async function readShortTermRecallEntries(params: {
   const store = await readStore(workspaceDir, nowIso);
   return Object.values(store.entries).filter(
     (entry): entry is ShortTermRecallEntry =>
-      Boolean(entry) && entry.source === "memory" && isShortTermMemoryPath(entry.path),
+      Boolean(entry) &&
+      entry.source === "memory" &&
+      (isShortTermMemoryPath(entry.path) || isDreamingDailySignalPath(entry.path)),
   );
 }
 
