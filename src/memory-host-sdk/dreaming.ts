@@ -81,6 +81,17 @@ export type MemoryDreamingStorageConfig = {
   separateReports: boolean;
 };
 
+export type MemoryDreamingSourceSelectionInclude = {
+  name?: string;
+  path: string;
+  pattern: string;
+};
+
+export type MemoryDreamingSourceSelectionConfig = {
+  include: MemoryDreamingSourceSelectionInclude[];
+  exclude: string[];
+};
+
 export type MemoryLightDreamingConfig = {
   enabled: boolean;
   cron: string;
@@ -133,6 +144,7 @@ export type MemoryDreamingConfig = {
   timezone?: string;
   verboseLogging: boolean;
   storage: MemoryDreamingStorageConfig;
+  sources?: MemoryDreamingSourceSelectionConfig;
   execution: {
     defaults: MemoryDreamingExecutionConfig;
   };
@@ -273,6 +285,53 @@ function normalizeStorageMode(value: unknown): MemoryDreamingStorageMode {
   return DEFAULT_MEMORY_DREAMING_STORAGE_MODE;
 }
 
+function normalizeUniqueTrimmedStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const normalized: string[] = [];
+  for (const entry of value) {
+    const candidate = normalizeTrimmedString(entry);
+    if (!candidate || normalized.includes(candidate)) {
+      continue;
+    }
+    normalized.push(candidate);
+  }
+  return normalized;
+}
+
+function normalizeDreamingSourceSelection(
+  value: unknown,
+): MemoryDreamingSourceSelectionConfig | undefined {
+  const record = asNullableRecord(value);
+  if (!record) {
+    return undefined;
+  }
+  const includeRaw = Array.isArray(record.include) ? record.include : [];
+  const include: MemoryDreamingSourceSelectionInclude[] = [];
+  for (const entry of includeRaw) {
+    const source = asNullableRecord(entry);
+    const sourcePath = normalizeTrimmedString(source?.path);
+    if (!sourcePath) {
+      continue;
+    }
+    const pattern = normalizeTrimmedString(source?.pattern) ?? "**/*.md";
+    const name = normalizeTrimmedString(source?.name);
+    include.push({
+      ...(name ? { name } : {}),
+      path: sourcePath,
+      pattern,
+    });
+  }
+  if (include.length === 0) {
+    return undefined;
+  }
+  return {
+    include,
+    exclude: normalizeUniqueTrimmedStringList(record.exclude),
+  };
+}
+
 function normalizeSpeed(value: unknown): MemoryDreamingSpeed | undefined {
   const normalized = normalizeOptionalLowercaseString(value);
   if (normalized === "fast" || normalized === "balanced" || normalized === "slow") {
@@ -369,6 +428,7 @@ export function resolveMemoryDreamingConfig(params: {
     normalizeTrimmedString(params.cfg?.agents?.defaults?.userTimezone) ??
     DEFAULT_MEMORY_DREAMING_TIMEZONE;
   const storage = asNullableRecord(dreaming?.storage);
+  const sourceSelection = normalizeDreamingSourceSelection(dreaming?.sources);
   const execution = asNullableRecord(dreaming?.execution);
   const phases = asNullableRecord(dreaming?.phases);
   const topLevelModel = normalizeTrimmedString(dreaming?.model);
@@ -402,6 +462,7 @@ export function resolveMemoryDreamingConfig(params: {
         DEFAULT_MEMORY_DREAMING_SEPARATE_REPORTS,
       ),
     },
+    ...(sourceSelection ? { sources: sourceSelection } : {}),
     execution: {
       defaults: defaultExecution,
     },
@@ -527,6 +588,7 @@ export function resolveMemoryDeepDreamingConfig(params: {
   timezone?: string;
   verboseLogging: boolean;
   storage: MemoryDreamingStorageConfig;
+  sourceSelection?: MemoryDreamingSourceSelectionConfig;
 } {
   const resolved = resolveMemoryDreamingConfig(params);
   return {
@@ -535,6 +597,7 @@ export function resolveMemoryDeepDreamingConfig(params: {
     ...(resolved.timezone ? { timezone: resolved.timezone } : {}),
     verboseLogging: resolved.verboseLogging,
     storage: resolved.storage,
+    ...(resolved.sources ? { sourceSelection: resolved.sources } : {}),
   };
 }
 
@@ -545,6 +608,7 @@ export function resolveMemoryLightDreamingConfig(params: {
   timezone?: string;
   verboseLogging: boolean;
   storage: MemoryDreamingStorageConfig;
+  sourceSelection?: MemoryDreamingSourceSelectionConfig;
 } {
   const resolved = resolveMemoryDreamingConfig(params);
   return {
@@ -553,6 +617,7 @@ export function resolveMemoryLightDreamingConfig(params: {
     ...(resolved.timezone ? { timezone: resolved.timezone } : {}),
     verboseLogging: resolved.verboseLogging,
     storage: resolved.storage,
+    ...(resolved.sources ? { sourceSelection: resolved.sources } : {}),
   };
 }
 
@@ -563,6 +628,7 @@ export function resolveMemoryRemDreamingConfig(params: {
   timezone?: string;
   verboseLogging: boolean;
   storage: MemoryDreamingStorageConfig;
+  sourceSelection?: MemoryDreamingSourceSelectionConfig;
 } {
   const resolved = resolveMemoryDreamingConfig(params);
   return {
@@ -571,6 +637,7 @@ export function resolveMemoryRemDreamingConfig(params: {
     ...(resolved.timezone ? { timezone: resolved.timezone } : {}),
     verboseLogging: resolved.verboseLogging,
     storage: resolved.storage,
+    ...(resolved.sources ? { sourceSelection: resolved.sources } : {}),
   };
 }
 

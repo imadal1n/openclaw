@@ -830,7 +830,7 @@ describe("memory-core dreaming phases", () => {
     ).toBe(true);
   });
 
-  it("prioritizes the date-only daily file before same-day slugged files when ingestion is capped", async () => {
+  it("does not ingest top-level memory files when Sona source selection limits dreaming to memory/daily", async () => {
     const workspaceDir = await createDreamingWorkspace();
     await fs.writeFile(
       path.join(workspaceDir, "memory", "2026-04-05.md"),
@@ -880,8 +880,8 @@ describe("memory-core dreaming phases", () => {
       minUniqueQueries: 0,
       nowMs: Date.parse("2026-04-05T10:05:00.000Z"),
     });
-    expect(after.some((entry) => entry.path === "memory/2026-04-05.md")).toBe(true);
-    expect(after.some((entry) => entry.snippet.includes("Canonical daily note"))).toBe(true);
+    expect(after.some((entry) => entry.path === "memory/2026-04-05.md")).toBe(false);
+    expect(after.some((entry) => entry.snippet.includes("Canonical daily note"))).toBe(false);
   });
 
   it("prioritizes the date-only daily file before same-day slugged files during historical seeding", async () => {
@@ -1125,18 +1125,22 @@ describe("memory-core dreaming phases", () => {
       vi.unstubAllEnvs();
     }
 
-    const mainCorpus = await fs.readFile(
-      path.join(workspaceDir, "memory", ".dreams", "session-corpus", "2026-04-05.txt"),
-      "utf-8",
+    const mainCorpusPath = path.join(
+      workspaceDir,
+      "memory",
+      ".dreams",
+      "session-corpus",
+      "2026-04-05.txt",
     );
-    const subagentCorpus = await fs.readFile(
-      path.join(subagentWorkspaceDir, "memory", ".dreams", "session-corpus", "2026-04-05.txt"),
-      "utf-8",
+    const subagentCorpusPath = path.join(
+      subagentWorkspaceDir,
+      "memory",
+      ".dreams",
+      "session-corpus",
+      "2026-04-05.txt",
     );
-    expect(mainCorpus).toContain("Main workspace should stay in main dreams.");
-    expect(mainCorpus).not.toContain("CEO workspace should stay in CEO dreams.");
-    expect(subagentCorpus).toContain("CEO workspace should stay in CEO dreams.");
-    expect(subagentCorpus).not.toContain("Main workspace should stay in main dreams.");
+    await expect(fs.stat(mainCorpusPath)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(fs.stat(subagentCorpusPath)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("redacts sensitive session content before writing session corpus", async () => {

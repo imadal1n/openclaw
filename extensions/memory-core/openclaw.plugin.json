@@ -54,6 +54,37 @@
           "verboseLogging": {
             "type": "boolean"
           },
+          "sources": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "include": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "pattern": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["path"]
+                }
+              },
+              "exclude": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
           "storage": {
             "type": "object",
             "additionalProperties": false,

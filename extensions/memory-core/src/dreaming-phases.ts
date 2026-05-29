@@ -49,10 +49,19 @@ import {
 
 type Logger = Pick<OpenClawPluginApi["logger"], "info" | "warn" | "error">;
 type DreamingHostConfig = unknown;
+type DreamingSourceSelectionConfig = {
+  include: Array<{
+    name?: string;
+    path: string;
+    pattern: string;
+  }>;
+  exclude: string[];
+};
 type DreamingPhaseStorageConfig = {
   timezone?: string;
   storage: { mode: "inline" | "separate" | "both"; separateReports: boolean };
   execution?: { model?: string };
+  sourceSelection?: DreamingSourceSelectionConfig;
 };
 type LightDreamingConfig = DreamingPhaseStorageConfig & {
   enabled: boolean;
@@ -451,6 +460,114 @@ type DailyIngestionState = {
   version: 1;
   files: Record<string, DailyIngestionFileState>;
 };
+
+type DailyIngestionCandidateFile = {
+  relativePath: string;
+  filePath: string;
+  day: string;
+};
+
+function normalizeRelativeWorkspacePath(filePath: string): string {
+  return filePath.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+/g, "/");
+}
+
+function isWorkspaceRelativePath(rootDir: string, filePath: string): boolean {
+  const relative = path.relative(rootDir, filePath);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function normalizeGlobPattern(pattern: string): string {
+  return pattern.replace(/\\/g, "/").replace(/^\.\//, "");
+}
+
+function matchesWorkspaceGlob(filePath: string, pattern: string): boolean {
+  return path.matchesGlob(normalizeRelativeWorkspacePath(filePath), normalizeGlobPattern(pattern));
+}
+
+function resolveCandidateDay(params: {
+  relativePath: string;
+  mtimeMs: number;
+  ingestionDreamingDay: string;
+  timezone?: string;
+}): string {
+  const basenameMatch = path.basename(params.relativePath).match(DAILY_MEMORY_FILENAME_RE);
+  if (basenameMatch?.[1]) {
+    return basenameMatch[1];
+  }
+  return Number.isFinite(params.mtimeMs)
+    ? formatMemoryDreamingDay(params.mtimeMs, params.timezone)
+    : params.ingestionDreamingDay;
+}
+
+async function collectConfiguredDailyIngestionFiles(params: {
+  workspaceDir: string;
+  lookbackDays: number;
+  nowMs: number;
+  ingestionDreamingDay: string;
+  timezone?: string;
+  sources: DreamingSourceSelectionConfig;
+}): Promise<DailyIngestionCandidateFile[]> {
+  const cutoffMs = calculateLookbackCutoffMs(params.nowMs, params.lookbackDays);
+  const collected = new Map<string, DailyIngestionCandidateFile>();
+  const resolvedWorkspaceDir = path.resolve(params.workspaceDir);
+  for (const source of params.sources.include) {
+    const sourceRoot = path.resolve(resolvedWorkspaceDir, source.path);
+    if (!isWorkspaceRelativePath(resolvedWorkspaceDir, sourceRoot)) {
+      continue;
+    }
+    try {
+      const matches = fs.glob(source.pattern, { cwd: sourceRoot });
+      for await (const match of matches) {
+        const filePath = path.resolve(sourceRoot, match);
+        if (!isWorkspaceRelativePath(resolvedWorkspaceDir, filePath)) {
+          continue;
+        }
+        const stat = await fs.stat(filePath).catch((err: unknown) => {
+          if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
+            return null;
+          }
+          throw err;
+        });
+        if (!stat?.isFile()) {
+          continue;
+        }
+        const relativePath = normalizeRelativeWorkspacePath(
+          path.relative(resolvedWorkspaceDir, filePath),
+        );
+        if (
+          params.sources.exclude.some((pattern: string) =>
+            matchesWorkspaceGlob(relativePath, pattern),
+          )
+        ) {
+          continue;
+        }
+        const day = resolveCandidateDay({
+          relativePath,
+          mtimeMs: stat.mtimeMs,
+          ingestionDreamingDay: params.ingestionDreamingDay,
+          timezone: params.timezone,
+        });
+        if (!isDayWithinLookback(day, cutoffMs)) {
+          continue;
+        }
+        collected.set(relativePath, {
+          relativePath,
+          filePath,
+          day,
+        });
+      }
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
+        continue;
+      }
+      throw err;
+    }
+  }
+  return [...collected.values()].toSorted((a, b) => {
+    const byDay = b.day.localeCompare(a.day);
+    return byDay !== 0 ? byDay : a.relativePath.localeCompare(b.relativePath);
+  });
+}
 
 export function normalizeDailyIngestionState(raw: unknown): DailyIngestionState {
   const record = asRecord(raw);
@@ -1151,29 +1268,50 @@ async function collectDailyIngestionBatches(params: {
   nowMs: number;
   ingestionDreamingDay: string;
   state: DailyIngestionState;
+  timezone?: string;
+  sources?: DreamingSourceSelectionConfig;
 }): Promise<DailyIngestionCollectionResult> {
   const memoryDir = path.join(params.workspaceDir, "memory");
   const cutoffMs = calculateLookbackCutoffMs(params.nowMs, params.lookbackDays);
-  const entries = await fs.readdir(memoryDir, { withFileTypes: true }).catch((err: unknown) => {
-    if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
-      return [] as Dirent[];
-    }
-    throw err;
-  });
-  const files = entries
-    .filter((entry) => entry.isFile())
-    .map((entry) => {
-      const file = parseDailyMemoryFileName(entry.name);
-      if (!file) {
-        return null;
-      }
-      if (!isDayWithinLookback(file.day, cutoffMs)) {
-        return null;
-      }
-      return file;
-    })
-    .filter((entry): entry is DailyMemoryFile => entry !== null)
-    .toSorted(compareDailyMemoryFilesByNewestDay);
+  const files: DailyIngestionCandidateFile[] = params.sources
+    ? await collectConfiguredDailyIngestionFiles({
+        workspaceDir: params.workspaceDir,
+        lookbackDays: params.lookbackDays,
+        nowMs: params.nowMs,
+        ingestionDreamingDay: params.ingestionDreamingDay,
+        timezone: params.timezone,
+        sources: params.sources,
+      })
+    : (
+        await fs.readdir(memoryDir, { withFileTypes: true }).catch((err: unknown) => {
+          if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
+            return [] as Dirent[];
+          }
+          throw err;
+        })
+      )
+        .filter((entry) => entry.isFile())
+        .map((entry) => {
+          const file = parseDailyMemoryFileName(entry.name);
+          if (!file) {
+            return null;
+          }
+          if (!isDayWithinLookback(file.day, cutoffMs)) {
+            return null;
+          }
+          return {
+            relativePath: `memory/${file.fileName}`,
+            filePath: path.join(memoryDir, file.fileName),
+            day: file.day,
+          };
+        })
+        .filter((entry): entry is DailyIngestionCandidateFile => entry !== null)
+        .toSorted((left, right) =>
+          compareDailyMemoryFilesByNewestDay(
+            { fileName: path.basename(left.filePath), day: left.day },
+            { fileName: path.basename(right.filePath), day: right.day },
+          ),
+        );
 
   const batches: DailyIngestionBatch[] = [];
   const nextFiles: Record<string, DailyIngestionFileState> = {};
@@ -1182,9 +1320,7 @@ async function collectDailyIngestionBatches(params: {
   const perFileCap = Math.max(6, Math.ceil(totalCap / Math.max(1, Math.max(files.length, 1))));
   let total = 0;
   for (const file of files) {
-    const relativePath = `memory/${file.fileName}`;
-    const filePath = path.join(memoryDir, file.fileName);
-    const stat = await fs.stat(filePath).catch((err: unknown) => {
+    const stat = await fs.stat(file.filePath).catch((err: unknown) => {
       if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
         return null;
       }
@@ -1197,15 +1333,15 @@ async function collectDailyIngestionBatches(params: {
       mtimeMs: Math.floor(Math.max(0, stat.mtimeMs)),
       size: Math.floor(Math.max(0, stat.size)),
     };
-    nextFiles[relativePath] = fingerprint;
-    const previous = params.state.files[relativePath];
+    nextFiles[file.relativePath] = fingerprint;
+    const previous = params.state.files[file.relativePath];
     const unchanged =
       previous !== undefined &&
       previous.mtimeMs === fingerprint.mtimeMs &&
       previous.size === fingerprint.size;
     const previousDreamingDay = normalizeMemoryDay(previous?.lastDreamingDayIngested);
     if (unchanged && previousDreamingDay === params.ingestionDreamingDay) {
-      nextFiles[relativePath] = {
+      nextFiles[file.relativePath] = {
         ...fingerprint,
         lastDreamingDayIngested: previousDreamingDay,
       };
@@ -1213,7 +1349,7 @@ async function collectDailyIngestionBatches(params: {
     }
     changed = true;
 
-    const raw = await fs.readFile(filePath, "utf-8").catch((err: unknown) => {
+    const raw = await fs.readFile(file.filePath, "utf-8").catch((err: unknown) => {
       if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
         return "";
       }
@@ -1227,7 +1363,7 @@ async function collectDailyIngestionBatches(params: {
     const results: MemorySearchResult[] = [];
     for (const chunk of chunks) {
       results.push({
-        path: relativePath,
+        path: file.relativePath,
         startLine: chunk.startLine,
         endLine: chunk.endLine,
         score: DAILY_INGESTION_SCORE,
@@ -1243,7 +1379,7 @@ async function collectDailyIngestionBatches(params: {
     }
     batches.push({ day: file.day, results });
     total += results.length;
-    nextFiles[relativePath] = {
+    nextFiles[file.relativePath] = {
       ...fingerprint,
       lastDreamingDayIngested: params.ingestionDreamingDay,
     };
@@ -1279,6 +1415,7 @@ async function ingestDailyMemorySignals(params: {
   limit: number;
   nowMs: number;
   timezone?: string;
+  sources?: DreamingSourceSelectionConfig;
 }): Promise<void> {
   const state = await readDailyIngestionState(params.workspaceDir);
   const ingestionDayBucket = formatMemoryDreamingDay(params.nowMs, params.timezone);
@@ -1289,6 +1426,7 @@ async function ingestDailyMemorySignals(params: {
     nowMs: params.nowMs,
     ingestionDreamingDay: ingestionDayBucket,
     state,
+    sources: params.sources,
   });
   for (const batch of collected.batches) {
     await recordShortTermRecalls({
@@ -1673,6 +1811,7 @@ async function runLightDreaming(params: {
     limit: params.config.limit,
     nowMs,
     timezone: params.config.timezone,
+    sources: params.config.sourceSelection,
   });
   await ingestSessionTranscriptSignals({
     workspaceDir: params.workspaceDir,
@@ -1777,6 +1916,7 @@ async function runRemDreaming(params: {
     limit: params.config.limit,
     nowMs,
     timezone: params.config.timezone,
+    sources: params.config.sourceSelection,
   });
   await ingestSessionTranscriptSignals({
     workspaceDir: params.workspaceDir,
