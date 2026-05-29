@@ -1318,8 +1318,16 @@ async function collectDailyIngestionBatches(params: {
         .filter((entry): entry is DailyIngestionCandidateFile => entry !== null)
         .toSorted((left, right) =>
           compareDailyMemoryFilesByNewestDay(
-            { fileName: path.basename(left.filePath), day: left.day },
-            { fileName: path.basename(right.filePath), day: right.day },
+            {
+              fileName: path.basename(left.filePath),
+              day: left.day,
+              canonical: path.basename(left.filePath).toLowerCase() === `${left.day}.md`,
+            },
+            {
+              fileName: path.basename(right.filePath),
+              day: right.day,
+              canonical: path.basename(right.filePath).toLowerCase() === `${right.day}.md`,
+            },
           ),
         );
 
