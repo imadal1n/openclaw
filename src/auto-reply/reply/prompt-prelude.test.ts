@@ -1,6 +1,7 @@
 // Tests prompt prelude construction for sender, routing, and context metadata.
 import { describe, expect, it } from "vitest";
 import { finalizeInboundContext } from "./inbound-context.js";
+import { buildInboundUserContextPrefix } from "./inbound-meta.js";
 import { buildReplyPromptEnvelope } from "./prompt-prelude.js";
 
 describe("buildReplyPromptEnvelope", () => {
@@ -56,6 +57,34 @@ describe("buildReplyPromptEnvelope", () => {
       text: "Current message:\nchat_id=C123",
       promptJoiner: " ",
     });
+  });
+
+  it("keeps minimal WhatsApp direct user text as the whole current request", () => {
+    const sessionCtx = finalizeInboundContext({
+      Body: "probe one",
+      BodyStripped: "probe one",
+      Provider: "whatsapp",
+      ChatType: "direct",
+      SenderName: "Mădălin",
+      SenderId: "+40729991311",
+      MessageSid: "wamid.123",
+    });
+    const inboundUserContext = buildInboundUserContextPrefix(sessionCtx);
+
+    const envelope = buildReplyPromptEnvelope({
+      ctx: sessionCtx,
+      sessionCtx,
+      baseBody: "probe one",
+      prefixedBody: "probe one",
+      hasUserBody: true,
+      inboundUserContext,
+      isBareSessionReset: false,
+      startupAction: "new",
+    });
+
+    expect(inboundUserContext).toBe("");
+    expect(envelope.prefixedCommandBody).toBe("probe one");
+    expect(envelope.currentInboundContext).toBeUndefined();
   });
 
   it("projects room events as context instead of user requests", () => {
