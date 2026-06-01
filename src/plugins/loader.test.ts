@@ -9,6 +9,7 @@ import {
   clearRuntimeConfigSnapshot,
   setRuntimeConfigSnapshot,
 } from "../config/runtime-snapshot.js";
+import { loadSessionStore, updateSessionStore } from "../config/sessions.js";
 import { getContextEngineFactory, listContextEngineIds } from "../context-engine/registry.js";
 import {
   clearInternalHooks,
@@ -5112,6 +5113,74 @@ module.exports = { id: "throws-after-import", register() {} };`,
         }),
       ),
     );
+  });
+
+  it("keeps next-turn injection callable from registered plugin http routes", async () => {
+    useNoBundledPlugins();
+    const stateDir = makeTempDir();
+    const storePath = path.join(stateDir, "sessions.json");
+    const runtimeConfig = {
+      session: { store: storePath },
+      plugins: {
+        enabled: true,
+        allow: ["http-route-enqueue"],
+      },
+    } satisfies PluginLoadConfig;
+    setRuntimeConfigSnapshot(runtimeConfig, runtimeConfig);
+    await updateSessionStore(
+      storePath,
+      (store) => {
+        store["agent:main:main"] = {
+          sessionId: "session-1",
+          updatedAt: Date.now(),
+        };
+      },
+      { skipMaintenance: true },
+    );
+    const plugin = writePlugin({
+      id: "http-route-enqueue",
+      filename: "http-route-enqueue.cjs",
+      body: `module.exports = { id: "http-route-enqueue", register(api) {
+  api.registerHttpRoute({ path: "/enqueue", auth: "plugin", handler: async () => {
+    await api.session.workflow.enqueueNextTurnInjection({
+      sessionKey: "agent:main:main",
+      text: "route-owned passive context",
+      placement: "prepend_context",
+      idempotencyKey: "route-passive-context",
+    });
+    return true;
+  } });
+} };`,
+    });
+
+    const registry = loadOpenClawPlugins({
+      cache: false,
+      config: {
+        ...runtimeConfig,
+        plugins: {
+          ...runtimeConfig.plugins,
+          load: { paths: [plugin.file] },
+          allow: ["http-route-enqueue"],
+        },
+      },
+    });
+    const route = registry.httpRoutes.find((entry) => entry.pluginId === "http-route-enqueue");
+
+    expect(route).toBeDefined();
+    await route?.handler(
+      {} as Parameters<NonNullable<typeof route>["handler"]>[0],
+      {} as Parameters<NonNullable<typeof route>["handler"]>[1],
+    );
+    expect(
+      loadSessionStore(storePath, { skipCache: true })["agent:main:main"]
+        ?.pluginNextTurnInjections?.["http-route-enqueue"]?.[0],
+    ).toMatchObject({
+      id: "route-passive-context",
+      pluginId: "http-route-enqueue",
+      text: "route-owned passive context",
+      placement: "prepend_context",
+      idempotencyKey: "route-passive-context",
+    });
   });
 
   it("rejects duplicate plugin registrations", () => {
