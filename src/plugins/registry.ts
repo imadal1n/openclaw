@@ -2951,6 +2951,16 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
               },
               registerSessionExtension: (extension) => registerSessionExtension(record, extension),
               enqueueNextTurnInjection: (injection) => {
+                if (
+                  registryParams.activateGlobalSideEffects === false ||
+                  !shouldCommitWorkflowSideEffect()
+                ) {
+                  return Promise.resolve({
+                    enqueued: false,
+                    id: "",
+                    sessionKey: injection.sessionKey,
+                  });
+                }
                 if (params.hookPolicy?.allowPromptInjection === false) {
                   pushDiagnostic({
                     level: "warn",
@@ -2964,8 +2974,11 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
                     sessionKey: injection.sessionKey,
                   });
                 }
+                const runtimeConfig = registryParams.runtime.config?.current?.() as
+                  | OpenClawConfig
+                  | undefined;
                 return enqueuePluginNextTurnInjection({
-                  cfg: registryParams.runtime.config.current() as OpenClawConfig,
+                  cfg: runtimeConfig?.session ? runtimeConfig : params.config,
                   pluginId: record.id,
                   pluginName: record.name,
                   injection,

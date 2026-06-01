@@ -1724,6 +1724,119 @@ describe("host-hook fixture plugin contract", () => {
     });
   });
 
+  it("uses plugin-load config for next-turn injection when runtime config lacks session config", async () => {
+    const stateDir = await fs.mkdtemp(
+      path.join(resolvePreferredOpenClawTmpDir(), "openclaw-host-hooks-api-config-"),
+    );
+    const storePath = path.join(stateDir, "sessions.json");
+    const tempConfig = {
+      session: { store: storePath },
+    };
+    const registry = createPluginRegistry({
+      logger: {
+        info() {},
+        warn() {},
+        error() {},
+        debug() {},
+      },
+      runtime: { config: { current: () => ({ plugins: { enabled: true } }) } } as PluginRuntime,
+    });
+    const record = createPluginRecord({
+      id: "api-config-fixture",
+      name: "API Config Fixture",
+      status: "loaded",
+    });
+    registry.registry.plugins.push(record);
+    setActivePluginRegistry(registry.registry);
+
+    try {
+      await updateSessionStore(storePath, (store) => {
+        store["agent:main:main"] = {
+          sessionId: "session-1",
+          updatedAt: Date.now(),
+        };
+        return undefined;
+      });
+
+      const api = registry.createApi(record, { config: tempConfig });
+      const result = await api.session.workflow.enqueueNextTurnInjection({
+        sessionKey: "agent:main:main",
+        text: "route-owned passive context",
+        placement: "prepend_context",
+        idempotencyKey: "route-passive-context",
+      });
+
+      expect(result.enqueued).toBe(true);
+      expect(result.sessionKey).toBe("agent:main:main");
+      const stored = loadSessionStore(storePath, { skipCache: true });
+      expect(
+        stored["agent:main:main"]?.pluginNextTurnInjections?.["api-config-fixture"]?.[0],
+      ).toMatchObject({
+        id: "route-passive-context",
+        pluginId: "api-config-fixture",
+        text: "route-owned passive context",
+        placement: "prepend_context",
+      });
+    } finally {
+      await fs.rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it("blocks next-turn injection writes from inactive plugin registries", async () => {
+    const stateDir = await fs.mkdtemp(
+      path.join(resolvePreferredOpenClawTmpDir(), "openclaw-host-hooks-inactive-api-"),
+    );
+    const storePath = path.join(stateDir, "sessions.json");
+    const tempConfig = {
+      session: { store: storePath },
+    };
+    const registry = createPluginRegistry({
+      logger: {
+        info() {},
+        warn() {},
+        error() {},
+        debug() {},
+      },
+      runtime: { config: { current: () => tempConfig } } as PluginRuntime,
+      activateGlobalSideEffects: false,
+    });
+    const record = createPluginRecord({
+      id: "inactive-api-fixture",
+      name: "Inactive API Fixture",
+      status: "loaded",
+    });
+    registry.registry.plugins.push(record);
+    setActivePluginRegistry(registry.registry);
+
+    try {
+      await updateSessionStore(storePath, (store) => {
+        store["agent:main:main"] = {
+          sessionId: "session-1",
+          updatedAt: Date.now(),
+        };
+        return undefined;
+      });
+
+      const api = registry.createApi(record, { config: tempConfig });
+      const result = await api.session.workflow.enqueueNextTurnInjection({
+        sessionKey: "agent:main:main",
+        text: "inactive route-owned passive context",
+        placement: "prepend_context",
+        idempotencyKey: "inactive-route-passive-context",
+      });
+
+      expect(result).toEqual({
+        enqueued: false,
+        id: "",
+        sessionKey: "agent:main:main",
+      });
+      const stored = loadSessionStore(storePath, { skipCache: true });
+      expect(stored["agent:main:main"]?.pluginNextTurnInjections).toBeUndefined();
+    } finally {
+      await fs.rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
   it("suppresses stale next-turn injections from plugins that are no longer loaded", async () => {
     const registry = createEmptyPluginRegistry();
     registry.plugins.push(
