@@ -591,7 +591,7 @@ describe("monitorMatrixProvider", () => {
     await expect(monitorPromise).resolves.toBeUndefined();
   });
 
-  it("re-arms the healthy-sync milestone across reconnect transitions", async () => {
+  it("preserves the healthy-sync milestone across transient reconnect transitions", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-10T16:21:00.000Z"));
     const abortController = new AbortController();
@@ -624,18 +624,17 @@ describe("monitorMatrixProvider", () => {
 
       await vi.advanceTimersByTimeAsync(5_000);
       hoisted.client.emit("sync.state", "RECONNECTING", "SYNCING", new Error("network flap"));
-      expect(getHealthySyncSinceMs()).toBeUndefined();
+      expect(getHealthySyncSinceMs()).toBe(firstHealthySyncSinceMs);
 
       await vi.advanceTimersByTimeAsync(7_000);
       hoisted.client.emit("sync.state", "SYNCING", "RECONNECTING", undefined);
-      const rearmedHealthySyncSinceMs = Date.now();
-      expect(getHealthySyncSinceMs()).toBe(rearmedHealthySyncSinceMs);
+      expect(getHealthySyncSinceMs()).toBe(firstHealthySyncSinceMs);
 
       abortController.abort();
       await expect(monitorPromise).resolves.toBeUndefined();
 
       hoisted.client.emit("sync.state", "RECONNECTING", "SYNCING", new Error("late noise"));
-      expect(getHealthySyncSinceMs()).toBe(rearmedHealthySyncSinceMs);
+      expect(getHealthySyncSinceMs()).toBe(firstHealthySyncSinceMs);
     } finally {
       vi.useRealTimers();
     }

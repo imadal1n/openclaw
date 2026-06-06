@@ -16,8 +16,8 @@ export function isMatrixReadySyncState(
 
 export function isMatrixDisconnectedSyncState(
   state: MatrixSyncState | null | undefined,
-): state is "RECONNECTING" | "ERROR" | "STOPPED" {
-  return state === "RECONNECTING" || state === "ERROR" || state === "STOPPED";
+): state is "STOPPED" {
+  return state === "STOPPED";
 }
 
 export function isMatrixTerminalSyncState(
