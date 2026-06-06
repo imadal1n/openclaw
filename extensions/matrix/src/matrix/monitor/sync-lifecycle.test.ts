@@ -167,6 +167,55 @@ describe("createMatrixMonitorSyncLifecycle", () => {
     }
   });
 
+  it("keeps transient ERROR states recoverable without marking the account disconnected", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-10T16:21:00.000Z"));
+    const { client, lifecycle, setStatus } = createSyncLifecycleHarness();
+    try {
+      setStatus.mockClear();
+
+      client.emit("sync.state", "SYNCING", "PREPARED", undefined);
+      const syncAt = Date.now();
+      expectLastStatusFields(setStatus, {
+        connected: true,
+        healthState: "healthy",
+        lastTransportActivityAt: syncAt,
+      });
+
+      await vi.advanceTimersByTimeAsync(2_000);
+      client.emit("sync.state", "ERROR", "SYNCING", new Error("fetch failed"));
+
+      expectLastStatusFields(setStatus, {
+        connected: true,
+        healthState: "error",
+        lastError: null,
+        lastDisconnect: null,
+        lastTransportActivityAt: syncAt,
+      });
+    } finally {
+      lifecycle.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps pre-sync ERROR states disconnected until a successful sync arrives", async () => {
+    const { client, lifecycle, setStatus } = createSyncLifecycleHarness();
+    try {
+      setStatus.mockClear();
+
+      client.emit("sync.state", "ERROR", null, new Error("fetch failed"));
+
+      expectLastStatusFields(setStatus, {
+        connected: false,
+        healthState: "error",
+        lastError: null,
+        lastDisconnect: null,
+      });
+    } finally {
+      lifecycle.dispose();
+    }
+  });
+
   it("does not downgrade a fatal error to stopped during shutdown", async () => {
     const { client, lifecycle, setStatus, setStopping, statusController } =
       createSyncLifecycleHarness({
