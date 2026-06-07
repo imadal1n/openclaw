@@ -14,6 +14,7 @@ import { compileMemoryWikiVault } from "./compile.js";
 import type { ResolvedMemoryWikiConfig } from "./config.js";
 import { appendMemoryWikiLog } from "./log.js";
 import { renderWikiMarkdown, type WikiPageSummary } from "./markdown.js";
+import { isImmutableImportedSourcePage } from "./source-page-classification.js";
 
 type MemoryWikiLintIssue = {
   severity: "error" | "warning";
@@ -194,7 +195,11 @@ function collectPageIssues(pages: WikiPageSummary[]): MemoryWikiLintIssue[] {
     }
 
     const freshness = assessPageFreshness(page);
-    if (page.kind !== "report" && (freshness.level === "stale" || freshness.level === "unknown")) {
+    if (
+      page.kind !== "report" &&
+      !isImmutableImportedSourcePage(page) &&
+      (freshness.level === "stale" || freshness.level === "unknown")
+    ) {
       issues.push({
         severity: "warning",
         category: "quality",

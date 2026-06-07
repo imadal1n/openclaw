@@ -42,6 +42,7 @@ import {
   WIKI_RELATED_END_MARKER,
   WIKI_RELATED_START_MARKER,
 } from "./markdown.js";
+import { isImmutableImportedSourcePage } from "./source-page-classification.js";
 import { initializeMemoryWikiVault } from "./vault.js";
 
 const COMPILE_PAGE_GROUPS: Array<{ kind: WikiPageKind; dir: string; heading: string }> = [
@@ -206,7 +207,7 @@ const DASHBOARD_PAGES: DashboardPageDefinition[] = [
     relativePath: "reports/stale-pages.md",
     buildBody: ({ config, pages, now }) => {
       const matches = pages
-        .filter((page) => page.kind !== "report")
+        .filter((page) => page.kind !== "report" && !isImmutableImportedSourcePage(page))
         .flatMap((page) => {
           const freshness = assessPageFreshness(page, now);
           if (freshness.level === "fresh") {
