@@ -19,6 +19,7 @@ import {
   type WikiPageSummary,
 } from "./markdown.js";
 import { readMemoryWikiSourceSyncState } from "./source-sync-state.js";
+import { isImmutableImportedSourcePage } from "./source-page-classification.js";
 
 type MemoryWikiLintIssue = {
   severity: "error" | "warning";
@@ -223,6 +224,7 @@ function collectPageIssues(
     if (
       requiresStructuredPageMetadata &&
       page.kind !== "report" &&
+      !isImmutableImportedSourcePage(page) &&
       (freshness.level === "stale" || freshness.level === "unknown")
     ) {
       issues.push({

@@ -430,4 +430,110 @@ describe("lintMemoryWikiVault", () => {
     await expect(fs.readFile(result.reportPath, "utf8")).resolves.toContain("### Contradictions");
     await expect(fs.readFile(result.reportPath, "utf8")).resolves.toContain("### Open Questions");
   });
+
+  it("does not emit stale-page warnings for immutable imported source pages", async () => {
+    const { rootDir, config } = await createVault({
+      prefix: "memory-wiki-lint-imported-source-freshness-",
+      config: {
+        vault: { renderMode: "native" },
+      },
+    });
+    await Promise.all(
+      ["sources", "syntheses"].map((dir) => fs.mkdir(path.join(rootDir, dir), { recursive: true })),
+    );
+
+    await fs.writeFile(
+      path.join(rootDir, "sources", "bridge-stale.md"),
+      renderWikiMarkdown({
+        frontmatter: {
+          pageType: "source",
+          id: "source.bridge.stale",
+          title: "Bridge Stale",
+          sourceType: "memory-bridge",
+          sourcePath: "memory/daily/2026-03-07.md",
+          bridgeRelativePath: "memory/daily/2026-03-07.md",
+          bridgeWorkspaceDir: "main",
+          updatedAt: "2025-10-01T00:00:00.000Z",
+        },
+        body: "# Bridge Stale\n",
+      }),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(rootDir, "sources", "bridge-events-unknown.md"),
+      renderWikiMarkdown({
+        frontmatter: {
+          pageType: "source",
+          id: "source.bridge.events.unknown",
+          title: "Bridge Events Unknown",
+          sourceType: "memory-bridge-events",
+          sourcePath: "memory/events.jsonl",
+          bridgeRelativePath: "memory/events.jsonl",
+          bridgeWorkspaceDir: "main",
+        },
+        body: "# Bridge Events Unknown\n",
+      }),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(rootDir, "sources", "unsafe-stale.md"),
+      renderWikiMarkdown({
+        frontmatter: {
+          pageType: "source",
+          id: "source.unsafe.stale",
+          title: "Unsafe Stale",
+          sourceType: "memory-unsafe-local",
+          provenanceMode: "unsafe-local",
+          sourcePath: "/home/limax/openclaw-workspace/memory/daily/2026-03-08.md",
+          unsafeLocalConfiguredPath: "/home/limax/openclaw-workspace/memory",
+          unsafeLocalRelativePath: "daily/2026-03-08.md",
+          updatedAt: "2025-10-01T00:00:00.000Z",
+        },
+        body: "# Unsafe Stale\n",
+      }),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(rootDir, "sources", "unsafe-mode-unknown.md"),
+      renderWikiMarkdown({
+        frontmatter: {
+          pageType: "source",
+          id: "source.unsafe.mode.unknown",
+          title: "Unsafe Mode Unknown",
+          sourcePath: "/home/limax/openclaw-workspace/memory/context/CONTEXT.md",
+          unsafeLocalConfiguredPath: "/home/limax/openclaw-workspace/memory",
+          unsafeLocalRelativePath: "context/CONTEXT.md",
+          provenanceMode: "unsafe-local",
+        },
+        body: "# Unsafe Mode Unknown\n",
+      }),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(rootDir, "syntheses", "stale-maintained.md"),
+      renderWikiMarkdown({
+        frontmatter: {
+          pageType: "synthesis",
+          id: "synthesis.stale.maintained",
+          title: "Stale Maintained",
+          sourceIds: ["source.bridge.stale"],
+          updatedAt: "2025-10-01T00:00:00.000Z",
+        },
+        body: "# Stale Maintained\n",
+      }),
+      "utf8",
+    );
+
+    const result = await lintMemoryWikiVault(config);
+    const stalePagePaths = result.issues
+      .filter((issue) => issue.code === "stale-page")
+      .map((issue) => issue.path)
+      .toSorted();
+
+    expect(stalePagePaths).toContain("syntheses/stale-maintained.md");
+    expect(stalePagePaths).not.toContain("sources/bridge-stale.md");
+    expect(stalePagePaths).not.toContain("sources/bridge-events-unknown.md");
+    expect(stalePagePaths).not.toContain("sources/unsafe-stale.md");
+    expect(stalePagePaths).not.toContain("sources/unsafe-mode-unknown.md");
+  });
 });

@@ -44,6 +44,7 @@ import {
   WIKI_RELATED_START_MARKER,
 } from "./markdown.js";
 import { readMemoryWikiSourceSyncState } from "./source-sync-state.js";
+import { isImmutableImportedSourcePage } from "./source-page-classification.js";
 import { initializeMemoryWikiVault } from "./vault.js";
 
 const COMPILE_PAGE_GROUPS: Array<{ kind: WikiPageKind; dir: string; heading: string }> = [
@@ -217,6 +218,7 @@ const DASHBOARD_PAGES: DashboardPageDefinition[] = [
             // concept/synthesis are intentionally durable references
             page.kind !== "concept" &&
             page.kind !== "synthesis" &&
+            !isImmutableImportedSourcePage(page) &&
             !(
               isUnmanagedRawSourceSummary(page) &&
               !managedImportedSourcePagePaths.has(page.relativePath)

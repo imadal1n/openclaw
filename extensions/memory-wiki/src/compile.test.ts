@@ -512,6 +512,23 @@ describe("compileMemoryWikiVault", () => {
         },
       },
     });
+    await fs.writeFile(
+      path.join(rootDir, "sources", "bridge-alpha.md"),
+      renderWikiMarkdown({
+        frontmatter: {
+          pageType: "source",
+          id: "source.bridge.alpha",
+          title: "Bridge Alpha Source",
+          sourceType: "memory-bridge",
+          sourcePath: "memory/daily/2026-03-07.md",
+          bridgeRelativePath: "memory/daily/2026-03-07.md",
+          bridgeWorkspaceDir: "main",
+          updatedAt: "2025-10-01T00:00:00.000Z",
+        },
+        body: "# Bridge Alpha Source\n",
+      }),
+      "utf8",
+    );
 
     const result = await compileMemoryWikiVault(config);
 
@@ -546,6 +563,12 @@ describe("compileMemoryWikiVault", () => {
     await expect(
       fs.readFile(path.join(rootDir, "reports", "stale-pages.md"), "utf8"),
     ).resolves.toContain("Tracked Raw Alpha Source");
+    await expect(
+      fs.readFile(path.join(rootDir, "reports", "stale-pages.md"), "utf8"),
+    ).resolves.toContain("[Alpha DB](concepts/alpha-db.md): stale");
+    await expect(
+      fs.readFile(path.join(rootDir, "reports", "stale-pages.md"), "utf8"),
+    ).resolves.not.toContain("Bridge Alpha Source");
     const agentDigest = JSON.parse(
       await fs.readFile(path.join(rootDir, ".openclaw-wiki", "cache", "agent-digest.json"), "utf8"),
     ) as {
