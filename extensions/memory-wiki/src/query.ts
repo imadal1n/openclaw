@@ -180,7 +180,7 @@ type WikiGetResult = {
   corpus: "wiki" | "memory";
   path: string;
   title: string;
-  kind: WikiPageSummary["kind"] | "memory";
+  kind: WikiPageSummary["kind"] | "index" | "memory";
   content: string;
   fromLine: number;
   lineCount: number;
@@ -260,6 +260,56 @@ async function listWikiMarkdownFiles(rootDir: string): Promise<string[]> {
 export async function readQueryableWikiPages(rootDir: string): Promise<QueryableWikiPage[]> {
   const files = await listWikiMarkdownFiles(rootDir);
   return readQueryableWikiPagesByPaths(rootDir, files);
+}
+
+const ROOT_INDEX_LOOKUP_ALIASES = new Set(["index", "index.md", "/", "wiki-index"]);
+
+function isRootIndexLookup(rootDir: string, lookup: string): boolean {
+  const trimmed = lookup.trim();
+  if (!trimmed || trimmed.includes("\0") || trimmed.includes("\\") || trimmed.includes("..")) {
+    return false;
+  }
+  if (trimmed === path.join(rootDir, "index.md")) {
+    return true;
+  }
+  if (ROOT_INDEX_LOOKUP_ALIASES.has(trimmed)) {
+    return true;
+  }
+  return trimmed === `${path.basename(rootDir)}/index.md`;
+}
+
+function extractMarkdownTitle(raw: string, fallback: string): string {
+  return raw.match(/^#\s+(.+?)\s*$/m)?.[1]?.trim() || fallback;
+}
+
+async function readRootIndexWikiGetResult(params: {
+  rootDir: string;
+  lookup: string;
+  fromLine: number;
+  lineCount: number;
+}): Promise<WikiGetResult | null> {
+  if (!isRootIndexLookup(params.rootDir, params.lookup)) {
+    return null;
+  }
+  const raw = await fs.readFile(path.join(params.rootDir, "index.md"), "utf8").catch(() => null);
+  if (raw === null) {
+    return null;
+  }
+  const parsed = parseWikiMarkdown(raw);
+  const lines = parsed.body.split(/\r?\n/);
+  const totalLines = lines.length;
+  const slice = lines.slice(params.fromLine - 1, params.fromLine - 1 + params.lineCount).join("\n");
+  return {
+    corpus: "wiki",
+    path: "index.md",
+    title: extractMarkdownTitle(parsed.body, "Wiki Index"),
+    kind: "index",
+    content: slice,
+    fromLine: params.fromLine,
+    lineCount: params.lineCount,
+    totalLines,
+    truncated: params.fromLine - 1 + params.lineCount < totalLines,
+  };
 }
 
 async function readQueryableWikiPagesByPaths(
@@ -1581,6 +1631,15 @@ export async function getMemoryWikiPage(params: {
         truncated,
         ...buildWikiResultMetadata(page),
       };
+    }
+    const rootIndex = await readRootIndexWikiGetResult({
+      rootDir: effectiveConfig.vault.path,
+      lookup: params.lookup,
+      fromLine,
+      lineCount,
+    });
+    if (rootIndex) {
+      return rootIndex;
     }
   }
 
