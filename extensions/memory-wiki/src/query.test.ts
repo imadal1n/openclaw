@@ -1390,6 +1390,71 @@ describe("getMemoryWikiPage", () => {
     expect(result?.lineCount).toBe(200);
   });
 
+  it("reads the root wiki index through wiki_get aliases", async () => {
+    const { rootDir, config } = await createQueryVault({
+      initialize: true,
+    });
+    await fs.writeFile(
+      path.join(rootDir, "index.md"),
+      "# Wiki Index\n\nRoot map line one\nRoot map line two\n",
+      "utf8",
+    );
+
+    for (const lookup of [
+      "index.md",
+      "index",
+      "/",
+      "wiki-index",
+      `${path.basename(rootDir)}/index.md`,
+      path.join(rootDir, "index.md"),
+    ]) {
+      const result = await getMemoryWikiPage({
+        config,
+        lookup,
+        fromLine: 3,
+        lineCount: 2,
+      });
+
+      expectFields(result, {
+        corpus: "wiki",
+        path: "index.md",
+        title: "Wiki Index",
+        kind: "index",
+      });
+      expect(result?.content).toContain("Root map line one");
+      expect(result?.content).toContain("Root map line two");
+    }
+  });
+
+  it("keeps normal queryable pages ahead of root index aliases", async () => {
+    const { rootDir, config } = await createQueryVault({
+      initialize: true,
+    });
+    await fs.writeFile(path.join(rootDir, "index.md"), "# Wiki Index\n\nRoot map\n", "utf8");
+    await fs.writeFile(
+      path.join(rootDir, "entities", "alpha.md"),
+      renderWikiMarkdown({
+        frontmatter: { pageType: "entity", id: "index", title: "Index Entity" },
+        body: "# Index Entity\n\nentity content\n",
+      }),
+      "utf8",
+    );
+
+    const result = await getMemoryWikiPage({
+      config,
+      lookup: "index",
+    });
+
+    expectFields(result, {
+      corpus: "wiki",
+      path: "entities/alpha.md",
+      title: "Index Entity",
+      kind: "entity",
+    });
+    expect(result?.content).toContain("entity content");
+    expect(result?.content).not.toContain("Root map");
+  });
+
   it("resolves compiled claim ids back to the owning page", async () => {
     const { rootDir, config } = await createQueryVault({
       initialize: true,
