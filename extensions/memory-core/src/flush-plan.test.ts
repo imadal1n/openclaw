@@ -14,6 +14,6 @@ describe("buildMemoryFlushPlan", () => {
       nowMs: 8_640_000_000_000_001,
     });
 
-    expect(plan?.relativePath).toBe("memory/2026-05-30.md");
+    expect(plan?.relativePath).toBe("memory/context/CONTEXT.md");
   });
 });
