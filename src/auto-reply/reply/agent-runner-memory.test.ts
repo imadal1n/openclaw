@@ -90,6 +90,7 @@ type ModelFallbackParams = {
 type EmbeddedAgentParams = {
   provider?: string;
   model?: string;
+  sessionId?: string;
   authProfileId?: unknown;
   authProfileIdSource?: unknown;
   prompt?: string;
@@ -785,12 +786,13 @@ describe("runMemoryFlushIfNeeded", () => {
     expect(fallbackCall.provider).toBe("ollama");
     expect(fallbackCall.model).toBe("qwen3:8b");
     expect(fallbackCall.abortSignal).toBe(replyOperation.abortSignal);
-    expect(fallbackCall.sessionId).toBe("session");
+    expect(fallbackCall.sessionId).toMatch(/^memory-flush-/);
     expect(fallbackCall.fallbacksOverride).toEqual([]);
     expect(runEmbeddedAgentMock).toHaveBeenCalledTimes(1);
     const agentCall = requireEmbeddedAgentCall();
     expect(agentCall.provider).toBe("ollama");
     expect(agentCall.model).toBe("qwen3:8b");
+    expect(agentCall.sessionId).toBe(fallbackCall.sessionId);
     expect(agentCall.abortSignal).toBe(replyOperation.abortSignal);
     expect(agentCall.authProfileId).toBeUndefined();
     expect(agentCall.authProfileIdSource).toBeUndefined();
