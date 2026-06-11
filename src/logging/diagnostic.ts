@@ -479,16 +479,24 @@ function resolveStalledEmbeddedRunAbortMs(stuckSessionWarnMs: number): number {
 
 function isStalledEmbeddedRunRecoveryEligible(params: {
   classification: SessionAttentionClassification | undefined;
-  ageMs: number;
+  activity?: DiagnosticSessionActivitySnapshot;
   stuckSessionAbortMs: number;
 }): boolean {
+  const lastProgressAgeMs = params.activity?.lastProgressAgeMs;
+  // Use run-progress age, not session lastActivity age: inbound messages refresh
+  // lastActivity while queued behind the same embedded run, which can otherwise
+  // keep a dead run below the abort threshold indefinitely.
   return (
     params.classification?.eventType === "session.stalled" &&
     params.classification.classification === "stalled_agent_run" &&
     params.classification.activeWorkKind === "embedded_run" &&
-    params.ageMs >= params.stuckSessionAbortMs
+    typeof lastProgressAgeMs === "number" &&
+    Number.isFinite(lastProgressAgeMs) &&
+    lastProgressAgeMs >= params.stuckSessionAbortMs
   );
 }
+
+export const isStalledEmbeddedRunRecoveryEligibleForTest = isStalledEmbeddedRunRecoveryEligible;
 
 function isBlockedToolCallRecoveryEligible(params: {
   classification: SessionAttentionClassification | undefined;
