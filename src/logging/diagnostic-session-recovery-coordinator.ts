@@ -129,6 +129,13 @@ function applyRecoveryOutcomeToDiagnosticState(params: {
     return;
   }
   const state = getDiagnosticSessionState(params.request);
+  const hasQueuedSessionWork = (params.request.queueDepth ?? 0) > 0;
+  const shouldIdleDespiteBlockedRun =
+    params.request.expectedState === "processing" &&
+    params.outcome.status === "aborted" &&
+    params.outcome.action === "abort_embedded_run" &&
+    params.outcome.drained === true &&
+    hasQueuedSessionWork;
   // The idle declaration is authoritative for the recovered owner only. If a
   // different embedded owner appeared under the same session key while recovery
   // awaited abort/drain, keep the lane active instead of erasing fresh work.
@@ -138,6 +145,7 @@ function applyRecoveryOutcomeToDiagnosticState(params: {
     activeSessionId: params.outcome.activeSessionId,
     recoveryStartedAfterEmbeddedRunSequence: params.recoveryStartedAfterEmbeddedRunSequence,
     recoveryStartedAfterDiagnosticEventSequence: params.recoveryStartedAfterDiagnosticEventSequence,
+    forceClearRecoveredOwnerRuns: shouldIdleDespiteBlockedRun,
   });
   if (activityClear.blockedByActiveEmbeddedRun) {
     emitSessionRecoveryCompleted({
@@ -155,9 +163,14 @@ function applyRecoveryOutcomeToDiagnosticState(params: {
   state.lastLongRunningWarnAgeMs = undefined;
   const preserveQueuedIdleWork =
     params.request.expectedState === "idle" && recoveryOutcomeHasQueuedLaneWork(params.outcome);
+  const preserveQueuedSessionWork =
+    params.request.expectedState === "processing" &&
+    params.outcome.status === "aborted" &&
+    params.outcome.action === "abort_embedded_run" &&
+    hasQueuedSessionWork;
   state.queueDepth = recoveryOutcomeClearsQueuedSessionState(params.outcome)
     ? 0
-    : preserveQueuedIdleWork
+    : preserveQueuedIdleWork || preserveQueuedSessionWork
       ? Math.max(state.queueDepth, params.request.queueDepth ?? 0)
       : Math.max(0, state.queueDepth - 1);
   emitDiagnosticEvent({
