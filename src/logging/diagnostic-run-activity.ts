@@ -509,14 +509,6 @@ export function clearDiagnosticEmbeddedRunActivityForSession(params: {
   activeSessionId?: string;
   recoveryStartedAfterEmbeddedRunSequence?: number;
   recoveryStartedAfterDiagnosticEventSequence?: number;
-  /**
-   * When true, also clear embedded runs that belong to the recovered owner but
-   * started after the recovery cutoff. Recovery uses this when the lane is
-   * empty (no released task) and queued session work is waiting, so a queued
-   * turn that re-armed under the same owner does not block the session from
-   * idling.
-   */
-  forceClearRecoveredOwnerRuns?: boolean;
 }): { cleared: boolean; blockedByActiveEmbeddedRun: boolean } {
   const shouldCreateCutoffActivity =
     params.recoveryStartedAfterDiagnosticEventSequence !== undefined;
@@ -559,17 +551,6 @@ export function clearDiagnosticEmbeddedRunActivityForSession(params: {
     ownerRefs,
     params.recoveryStartedAfterDiagnosticEventSequence,
   );
-  if (params.forceClearRecoveredOwnerRuns) {
-    for (const [key, run] of activity.activeEmbeddedRuns) {
-      if (
-        run.sessionId !== undefined &&
-        ownerRefs.has(run.sessionId) &&
-        embeddedRunStartedAfter(run, params.recoveryStartedAfterEmbeddedRunSequence)
-      ) {
-        activity.activeEmbeddedRuns.delete(key);
-      }
-    }
-  }
   if (activity.activeEmbeddedRuns.size > 0) {
     if (hasEmbeddedRunStartedAfter(activity, params.recoveryStartedAfterEmbeddedRunSequence)) {
       pruneActivityStartedBeforeRecoveryCutoff(
