@@ -2373,6 +2373,23 @@ function extractPromotionMarkers(memoryText: string): Set<string> {
   return markers;
 }
 
+function resolvePromotionMemoryPath(
+  workspaceDir: string,
+  nowMs: number,
+  timezone?: string,
+): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone ?? "UTC",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(nowMs));
+  const year = parts.find((part) => part.type === "year")?.value ?? "0000";
+  const month = parts.find((part) => part.type === "month")?.value ?? "00";
+  const day = parts.find((part) => part.type === "day")?.value ?? "00";
+  return path.join(workspaceDir, "memory", "promotions", `${year}-${month}-${day}.md`);
+}
+
 export async function applyShortTermPromotions(
   options: ApplyShortTermPromotionsOptions,
 ): Promise<ApplyShortTermPromotionsResult> {
@@ -2392,7 +2409,7 @@ export async function applyShortTermPromotions(
     DEFAULT_PROMOTION_MIN_UNIQUE_QUERIES,
   );
   const maxAgeDays = toFiniteNonNegativeInt(options.maxAgeDays, -1);
-  const memoryPath = path.join(workspaceDir, "MEMORY.md");
+  const memoryPath = resolvePromotionMemoryPath(workspaceDir, nowMs, options.timezone);
 
   return await withShortTermLock(workspaceDir, async () => {
     const store = await readStore(workspaceDir, nowIso);
@@ -2453,6 +2470,7 @@ export async function applyShortTermPromotions(
       };
     }
 
+    await fs.mkdir(path.dirname(memoryPath), { recursive: true });
     const existingMemory = await fs.readFile(memoryPath, "utf-8").catch((err: unknown) => {
       if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
         return "";

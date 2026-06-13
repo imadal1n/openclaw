@@ -83,6 +83,18 @@ describe("short-term promotion", () => {
     return notePath;
   }
 
+  function promotionMemoryPath(workspaceDir: string, date: string): string {
+    return path.join(workspaceDir, "memory", "promotions", `${date}.md`);
+  }
+
+  async function readPromotionMemory(workspaceDir: string): Promise<string> {
+    const dir = path.join(workspaceDir, "memory", "promotions");
+    const entries: string[] = await fs.readdir(dir);
+    const markdownEntries = entries.filter((entry) => entry.endsWith(".md"));
+    expect(markdownEntries).toHaveLength(1);
+    return await fs.readFile(path.join(dir, markdownEntries[0] as string), "utf-8");
+  }
+
   function requireCandidateKey(
     candidate: { key?: string } | null | undefined,
     label: string,
@@ -802,7 +814,7 @@ describe("short-term promotion", () => {
       });
 
       expect(applied.applied).toBe(1);
-      const memory = await fs.readFile(path.join(workspaceDir, "MEMORY.md"), "utf-8");
+      const memory = await readPromotionMemory(workspaceDir);
       expect(memory).toContain('Always use "Happy Together" calendar');
     });
   });
@@ -1288,7 +1300,7 @@ describe("short-term promotion", () => {
       expect(secondApply.appended).toBe(0);
       expect(secondApply.reconciledExisting).toBe(1);
 
-      const memoryText = await fs.readFile(path.join(workspaceDir, "MEMORY.md"), "utf-8");
+      const memoryText = await readPromotionMemory(workspaceDir);
       expect(memoryText.match(/openclaw-memory-promotion:/g)?.length).toBe(1);
       expect(
         memoryText.match(/The gateway should stay loopback-only on port 18789\./g)?.length,
@@ -1354,7 +1366,7 @@ describe("short-term promotion", () => {
       expect(secondApply.appended).toBe(0);
       expect(secondApply.reconciledExisting).toBe(1);
 
-      const memoryText = await fs.readFile(path.join(workspaceDir, "MEMORY.md"), "utf-8");
+      const memoryText = await readPromotionMemory(workspaceDir);
       expect(memoryText).toContain(
         "<!-- openclaw-memory-promotion:memory:memory/project alpha/2026-04-01.md:2:2 -->",
       );
@@ -1666,9 +1678,7 @@ describe("short-term promotion", () => {
       });
 
       expect(applied.applied).toBe(0);
-      const memoryText = await fs
-        .readFile(path.join(workspaceDir, "MEMORY.md"), "utf-8")
-        .catch(() => "");
+      const memoryText = await readPromotionMemory(workspaceDir).catch(() => "");
       expect(memoryText).not.toContain("Promoted From Short-Term Memory");
       expect(memoryText).not.toContain("staged dream scratchwork");
     });
@@ -1713,7 +1723,7 @@ describe("short-term promotion", () => {
       });
 
       expect(applied.applied).toBe(0);
-      await expectEnoent(fs.readFile(path.join(workspaceDir, "MEMORY.md"), "utf-8"));
+      await expectEnoent(readPromotionMemory(workspaceDir));
     });
   });
 
@@ -1756,11 +1766,11 @@ describe("short-term promotion", () => {
       });
 
       expect(applied.applied).toBe(0);
-      await expectEnoent(fs.readFile(path.join(workspaceDir, "MEMORY.md"), "utf-8"));
+      await expectEnoent(readPromotionMemory(workspaceDir));
     });
   });
 
-  it("applies promotion candidates to MEMORY.md and marks them promoted", async () => {
+  it("applies promotion candidates to a dated promotion memory file and marks them promoted", async () => {
     await withTempWorkspace(async (workspaceDir) => {
       await writeDailyMemoryNote(workspaceDir, "2026-04-01", [
         "alpha",
@@ -1806,7 +1816,7 @@ describe("short-term promotion", () => {
       });
       expect(applied.applied).toBe(1);
 
-      const memoryText = await fs.readFile(path.join(workspaceDir, "MEMORY.md"), "utf-8");
+      const memoryText = await readPromotionMemory(workspaceDir);
       expect(memoryText).toContain("Promoted From Short-Term Memory");
       expect(memoryText).toContain("memory/2026-04-01.md:10-10");
 
@@ -1868,13 +1878,13 @@ describe("short-term promotion", () => {
       });
 
       expect(applied.applied).toBe(1);
-      const memoryText = await fs.readFile(path.join(workspaceDir, "MEMORY.md"), "utf-8");
+      const memoryText = await readPromotionMemory(workspaceDir);
       expect(memoryText).toContain("- Gateway binds loopback and port 18789");
       expect(memoryText).not.toContain("- - Gateway binds loopback and port 18789");
     });
   });
 
-  it("keeps promoted MEMORY.md entries compact while preserving provenance", async () => {
+  it("keeps promoted memory entries compact while preserving provenance", async () => {
     await withTempWorkspace(async (workspaceDir) => {
       const longDailyEntry = [
         "HanJammer reviewed the dashboard state and asked for durable memory hygiene.",
@@ -1914,7 +1924,7 @@ describe("short-term promotion", () => {
       });
 
       expect(applied.applied).toBe(1);
-      const memoryText = await fs.readFile(path.join(workspaceDir, "MEMORY.md"), "utf-8");
+      const memoryText = await readPromotionMemory(workspaceDir);
       const promotedLine = memoryText
         .split("\n")
         .find((line) => line.startsWith("- HanJammer reviewed the dashboard state"));
@@ -1983,7 +1993,7 @@ describe("short-term promotion", () => {
       });
       expect(second.applied).toBe(0);
 
-      const memoryText = await fs.readFile(path.join(workspaceDir, "MEMORY.md"), "utf-8");
+      const memoryText = await readPromotionMemory(workspaceDir);
       const sectionCount = memoryText.match(/Promoted From Short-Term Memory/g)?.length ?? 0;
       expect(sectionCount).toBe(1);
     });
@@ -2029,7 +2039,7 @@ describe("short-term promotion", () => {
       expect(applied.applied).toBe(1);
       expect(applied.appliedCandidates[0]?.startLine).toBe(3);
       expect(applied.appliedCandidates[0]?.endLine).toBe(3);
-      const memoryText = await fs.readFile(path.join(workspaceDir, "MEMORY.md"), "utf-8");
+      const memoryText = await readPromotionMemory(workspaceDir);
       expect(memoryText).toContain("memory/2026-04-01.md:3-3");
     });
   });
@@ -2082,7 +2092,7 @@ describe("short-term promotion", () => {
       expect(applied.appliedCandidates[0]?.snippet).toBe(
         "模型切换 (16:23): **需求**: 用户想使用小米 Mimo 模型作为默认",
       );
-      const memoryText = await fs.readFile(path.join(workspaceDir, "MEMORY.md"), "utf-8");
+      const memoryText = await readPromotionMemory(workspaceDir);
       expect(memoryText).toContain("memory/2026-05-28.md:4-4");
       expect(memoryText).toContain("模型切换 (16:23): **需求**");
     });
@@ -2138,7 +2148,7 @@ describe("short-term promotion", () => {
       expect(applied.appliedCandidates[0]?.snippet).toBe(
         "模型切换 (16:23): **需求**: 用户想使用小米 Mimo 模型作为默认; **偏好**: 保持低成本默认路由",
       );
-      const memoryText = await fs.readFile(path.join(workspaceDir, "MEMORY.md"), "utf-8");
+      const memoryText = await readPromotionMemory(workspaceDir);
       expect(memoryText).toContain("memory/2026-05-28.md:4-5");
       expect(memoryText).toContain("模型切换 (16:23): **需求**");
       expect(memoryText).toContain("**偏好**: 保持低成本默认路由");
@@ -2191,7 +2201,7 @@ describe("short-term promotion", () => {
       expect(applied.appliedCandidates[0]?.snippet).toBe(
         "New model routing (16:23): Keep Xiaomi Mimo as the low-cost default.",
       );
-      const memoryText = await fs.readFile(path.join(workspaceDir, "MEMORY.md"), "utf-8");
+      const memoryText = await readPromotionMemory(workspaceDir);
       expect(memoryText).toContain("New model routing (16:23)");
       expect(memoryText).not.toContain("Old model routing");
     });
@@ -2289,7 +2299,7 @@ describe("short-term promotion", () => {
       expect(applied.appliedCandidates[0]?.snippet).toBe(
         "Keep Xiaomi Mimo as the low-cost default.",
       );
-      const memoryText = await fs.readFile(path.join(workspaceDir, "MEMORY.md"), "utf-8");
+      const memoryText = await readPromotionMemory(workspaceDir);
       expect(memoryText).not.toContain("Model routing: Keep Xiaomi");
     });
   });
@@ -2514,7 +2524,7 @@ describe("short-term promotion", () => {
       expect(applied.appliedCandidates[0]?.endLine).toBe(5);
       expect(applied.appliedCandidates[0]?.snippet).toContain(firstListItem);
       expect(applied.appliedCandidates[0]?.snippet).toContain(secondListItem);
-      const memoryText = await fs.readFile(path.join(workspaceDir, "MEMORY.md"), "utf-8");
+      const memoryText = await readPromotionMemory(workspaceDir);
       expect(memoryText).toContain("memory/2026-05-28.md:4-5");
       expect(memoryText).toContain(secondListItem);
     });
@@ -2569,7 +2579,7 @@ describe("short-term promotion", () => {
       expect(applied.appliedCandidates[0]?.snippet).toBe(
         "Reviewed travel timing before the workshop.",
       );
-      const memoryText = await fs.readFile(path.join(workspaceDir, "MEMORY.md"), "utf-8");
+      const memoryText = await readPromotionMemory(workspaceDir);
       expect(memoryText).not.toContain("Morning:");
       expect(memoryText).not.toContain("Model routing: Reviewed travel timing");
     });
@@ -2624,7 +2634,7 @@ describe("short-term promotion", () => {
       expect(applied.appliedCandidates[0]?.snippet).toBe(
         "Reviewed travel timing before the workshop.",
       );
-      const memoryText = await fs.readFile(path.join(workspaceDir, "MEMORY.md"), "utf-8");
+      const memoryText = await readPromotionMemory(workspaceDir);
       expect(memoryText).not.toContain("Light Sleep:");
     });
   });
@@ -2761,7 +2771,7 @@ describe("short-term promotion", () => {
       });
 
       expect(applied.applied).toBe(1);
-      const memoryText = await fs.readFile(path.join(workspaceDir, "MEMORY.md"), "utf-8");
+      const memoryText = await readPromotionMemory(workspaceDir);
       expect(memoryText).toContain("source=2026-04-01.md:1-1");
     });
   });
@@ -2844,7 +2854,7 @@ describe("short-term promotion", () => {
       });
 
       expect(applied.applied).toBe(1);
-      const memoryText = await fs.readFile(path.join(workspaceDir, "MEMORY.md"), "utf-8");
+      const memoryText = await readPromotionMemory(workspaceDir);
       expect(memoryText).toContain("Promoted From Short-Term Memory (2026-04-01)");
     });
   });
@@ -3216,7 +3226,7 @@ describe("short-term promotion", () => {
     ]);
   });
 
-  describe("MEMORY.md budget compaction (#73691)", () => {
+  describe("promotion memory budget compaction (#73691)", () => {
     it("drops the oldest promoted section before write when memoryFileMaxChars would be exceeded", async () => {
       await withTempWorkspace(async (workspaceDir) => {
         // Source daily note that the candidate references (rehydrate reads it).
@@ -3226,8 +3236,8 @@ describe("short-term promotion", () => {
           "Rotate the staging Postgres credentials before next deploy.",
         ]);
 
-        // Seed an oversized MEMORY.md with two pre-existing promotion sections.
-        const memoryPath = path.join(workspaceDir, "MEMORY.md");
+        const memoryPath = promotionMemoryPath(workspaceDir, "2026-04-29");
+        await fs.mkdir(path.dirname(memoryPath), { recursive: true });
         const filler = "x".repeat(600);
         const seeded = [
           "# Long-Term Memory",
@@ -3288,7 +3298,7 @@ describe("short-term promotion", () => {
       });
     });
 
-    it("leaves MEMORY.md untouched when total stays within memoryFileMaxChars", async () => {
+    it("leaves promotion memory content untouched when total stays within memoryFileMaxChars", async () => {
       await withTempWorkspace(async (workspaceDir) => {
         await writeDailyMemoryNote(workspaceDir, "2026-04-29", [
           "Notes",
@@ -3296,7 +3306,8 @@ describe("short-term promotion", () => {
           "A short snippet that fits comfortably.",
         ]);
 
-        const memoryPath = path.join(workspaceDir, "MEMORY.md");
+        const memoryPath = promotionMemoryPath(workspaceDir, "2026-04-29");
+        await fs.mkdir(path.dirname(memoryPath), { recursive: true });
         const seeded = "# Long-Term Memory\n\nSome small existing content.\n";
         await fs.writeFile(memoryPath, seeded, "utf-8");
 
@@ -3329,6 +3340,7 @@ describe("short-term promotion", () => {
           minScore: 0,
           minRecallCount: 0,
           minUniqueQueries: 0,
+          nowMs: Date.parse("2026-04-29T10:00:00.000Z"),
           memoryFileMaxChars: 10_000,
         });
 
