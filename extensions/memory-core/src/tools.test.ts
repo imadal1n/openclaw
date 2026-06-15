@@ -176,13 +176,15 @@ describe("memory_search unavailable payloads", () => {
       const tool = createMemorySearchToolOrThrow();
 
       const resultPromise = tool.execute("manager-timeout", { query: "hello" });
-      await vi.advanceTimersByTimeAsync(15_000);
+      await vi.advanceTimersByTimeAsync(30_000);
 
       const result = await resultPromise;
       expectUnavailableMemorySearchDetails(result.details, {
-        error: "memory_search timed out after 15s",
-        warning: "Memory search is unavailable due to an embedding/provider error.",
-        action: "Check embedding provider configuration and retry memory_search.",
+        error: "memory_search timed out after 30s",
+        warning:
+          "Memory search timed out before the memory backend finished. The index may be warming or busy.",
+        action:
+          "Retry memory_search, or use a narrower memory source if the answer is time-sensitive.",
       });
     } finally {
       vi.useRealTimers();
@@ -202,21 +204,25 @@ describe("memory_search unavailable payloads", () => {
       const tool = createMemorySearchToolOrThrow();
 
       const resultPromise = tool.execute("search-timeout", { query: "hello" });
-      await vi.advanceTimersByTimeAsync(15_000);
+      await vi.advanceTimersByTimeAsync(30_000);
 
       const result = await resultPromise;
       expectUnavailableMemorySearchDetails(result.details, {
-        error: "memory_search timed out after 15s",
-        warning: "Memory search is unavailable due to an embedding/provider error.",
-        action: "Check embedding provider configuration and retry memory_search.",
+        error: "memory_search timed out after 30s",
+        warning:
+          "Memory search timed out before the memory backend finished. The index may be warming or busy.",
+        action:
+          "Retry memory_search, or use a narrower memory source if the answer is time-sensitive.",
       });
       // The deadline must abort the orphaned search, not just race past it.
       expect(searchSignal?.aborted).toBe(true);
       const cooldownResult = await tool.execute("search-cooldown", { query: "hello again" });
       expectUnavailableMemorySearchDetails(cooldownResult.details, {
-        error: "memory_search timed out after 15s",
-        warning: "Memory search is unavailable due to an embedding/provider error.",
-        action: "Check embedding provider configuration and retry memory_search.",
+        error: "memory_search timed out after 30s",
+        warning:
+          "Memory search timed out before the memory backend finished. The index may be warming or busy.",
+        action:
+          "Retry memory_search, or use a narrower memory source if the answer is time-sensitive.",
       });
       expect(searchCalls).toBe(1);
     } finally {
