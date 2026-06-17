@@ -565,7 +565,7 @@ describe("compileMemoryWikiVault", () => {
     ).resolves.toContain("Tracked Raw Alpha Source");
     await expect(
       fs.readFile(path.join(rootDir, "reports", "stale-pages.md"), "utf8"),
-    ).resolves.toContain("[Alpha DB](concepts/alpha-db.md): stale");
+    ).resolves.toContain("[Alpha DB](../concepts/alpha-db.md): stale");
     await expect(
       fs.readFile(path.join(rootDir, "reports", "stale-pages.md"), "utf8"),
     ).resolves.not.toContain("Bridge Alpha Source");
