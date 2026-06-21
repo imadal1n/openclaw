@@ -1782,7 +1782,7 @@ describe("QmdMemoryManager", () => {
       .map((args) => args[args.indexOf("--name") + 1]);
 
     expect(updateCalls).toBe(2);
-    expect(removeCalls).toEqual([]);
+    expect(removeCalls).toEqual(["memory-root-main", "memory-dir-main"]);
     expect(addCalls).toEqual(["memory-root-main", "memory-dir-main"]);
     expectMockMessageContains(logWarnMock, "suspected null-byte collection metadata");
 
@@ -1837,7 +1837,7 @@ describe("QmdMemoryManager", () => {
       .map((args) => args[args.indexOf("--name") + 1]);
 
     expect(updateCalls).toBe(2);
-    expect(removeCalls).toEqual([]);
+    expect(removeCalls).toEqual(["memory-root-main", "memory-dir-main"]);
     expect(addCalls).toEqual(["memory-root-main", "memory-dir-main"]);
     expectMockMessageContains(logWarnMock, "suspected null-byte collection metadata");
 
@@ -1892,7 +1892,7 @@ describe("QmdMemoryManager", () => {
       .map((args) => args[args.indexOf("--name") + 1]);
 
     expect(updateCalls).toBe(2);
-    expect(removeCalls).toEqual([]);
+    expect(removeCalls).toEqual(["memory-root-main", "memory-dir-main"]);
     expect(addCalls).toEqual(["memory-root-main", "memory-dir-main"]);
     expectMockMessageContains(logWarnMock, "duplicate document constraint");
 
