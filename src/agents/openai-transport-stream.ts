@@ -99,6 +99,7 @@ import { transformTransportMessages } from "./transport-message-transform.js";
 import {
   assignTransportErrorDetails,
   mergeTransportMetadata,
+  sanitizeNonEmptyTransportPayloadText,
   sanitizeTransportPayloadText,
 } from "./transport-stream-shared.js";
 
@@ -1275,6 +1276,8 @@ function convertResponsesMessages(
         .filter((item) => item.type === "text")
         .map((item) => item.text)
         .join("\n");
+      const sanitizedTextResult = sanitizeTransportPayloadText(textResult);
+      const hasText = sanitizedTextResult.trim().length > 0;
       const hasImages = msg.content.some((item) => item.type === "image");
       const [callId] = msg.toolCallId.split("|");
       messages.push({
@@ -1283,9 +1286,7 @@ function convertResponsesMessages(
         output:
           hasImages && model.input.includes("image")
             ? ([
-                ...(textResult
-                  ? [{ type: "input_text", text: sanitizeTransportPayloadText(textResult) }]
-                  : []),
+                ...(hasText ? [{ type: "input_text", text: sanitizedTextResult }] : []),
                 ...msg.content
                   .filter((item) => item.type === "image")
                   .map((item) => ({
@@ -1294,7 +1295,10 @@ function convertResponsesMessages(
                     image_url: `data:${item.mimeType};base64,${item.data}`,
                   })),
               ] as ResponseFunctionCallOutputItemList)
-            : sanitizeTransportPayloadText(textResult || "(see attached image)"),
+            : sanitizeNonEmptyTransportPayloadText(
+                textResult,
+                hasImages ? "(see attached image)" : "(no output)",
+              ),
       });
     }
     msgIndex += 1;
