@@ -332,7 +332,7 @@ function convertContentBlocks(
       });
     }
   }
-  if (!hasTextBlock) {
+  if (!hasTextBlock && blocks.length > 0) {
     return [{ type: "text", text: "(see attached image)" }, ...blocks];
   }
   return blocks;
