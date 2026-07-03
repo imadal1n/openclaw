@@ -263,6 +263,60 @@ describe("convertResponsesMessages", () => {
     });
   });
 
+  it("does not turn empty text-only tool outputs into fake image placeholders", () => {
+    const input = convertResponsesMessages(
+      nativeOpenAIModel,
+      {
+        systemPrompt: "system",
+        messages: [
+          {
+            role: "toolResult",
+            toolCallId: "call_empty",
+            toolName: "read",
+            content: [{ type: "text", text: "" }],
+            isError: false,
+            timestamp: 1,
+          },
+        ],
+      } satisfies Context,
+      allowedToolCallProviders,
+      { includeSystemPrompt: false },
+    ) as unknown as Array<Record<string, unknown>>;
+
+    expect(input).toContainEqual({
+      type: "function_call_output",
+      call_id: "call_empty",
+      output: "(no output)",
+    });
+  });
+
+  it("does not use fake image placeholders for image-only outputs on text-only models", () => {
+    const input = convertResponsesMessages(
+      nativeOpenAIModel,
+      {
+        systemPrompt: "system",
+        messages: [
+          {
+            role: "toolResult",
+            toolCallId: "call_image",
+            toolName: "screenshot",
+            content: [{ type: "image", mimeType: "image/png", data: "abcd" }],
+            isError: false,
+            timestamp: 1,
+          },
+        ],
+      } satisfies Context,
+      allowedToolCallProviders,
+      { includeSystemPrompt: false },
+    ) as unknown as Array<Record<string, unknown>>;
+
+    expect(input).toContainEqual({
+      type: "function_call_output",
+      call_id: "call_image",
+      output: "(tool image omitted: model does not support images)",
+    });
+  });
+
   it("strips the internal cache boundary marker from the system prompt message", () => {
     const input = convertResponsesMessages(
       nativeOpenAIModel,
@@ -479,6 +533,100 @@ describe("convertResponsesMessages", () => {
       call_id: "call_abc",
     });
     expect(functionCall).not.toHaveProperty("id");
+  });
+
+  it("replays update_plan-style empty non-image tool results as no output", () => {
+    const input = convertResponsesMessages(
+      nativeOpenAIModel,
+      {
+        systemPrompt: "system",
+        messages: [
+          {
+            role: "assistant",
+            api: nativeOpenAIModel.api,
+            provider: nativeOpenAIModel.provider,
+            model: nativeOpenAIModel.id,
+            usage: {
+              input: 0,
+              output: 0,
+              cacheRead: 0,
+              cacheWrite: 0,
+              totalTokens: 0,
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+            },
+            stopReason: "toolUse",
+            timestamp: 1,
+            content: [{ type: "toolCall", id: "call_plan", name: "update_plan", arguments: {} }],
+          },
+          {
+            role: "toolResult",
+            toolCallId: "call_plan",
+            toolName: "update_plan",
+            content: [],
+            isError: false,
+            timestamp: 2,
+          },
+        ],
+      } satisfies Context,
+      allowedToolCallProviders,
+      { includeSystemPrompt: false },
+    ) as unknown as Array<Record<string, unknown>>;
+
+    const functionOutput = input.find((item) => item.type === "function_call_output");
+    expect(functionOutput).toMatchObject({
+      type: "function_call_output",
+      call_id: "call_plan",
+      output: "(no output)",
+    });
+  });
+
+  it("preserves image-bearing tool results instead of using no-output text", () => {
+    const input = convertResponsesMessages(
+      { ...nativeOpenAIModel, input: ["text", "image"] },
+      {
+        systemPrompt: "system",
+        messages: [
+          {
+            role: "assistant",
+            api: nativeOpenAIModel.api,
+            provider: nativeOpenAIModel.provider,
+            model: nativeOpenAIModel.id,
+            usage: {
+              input: 0,
+              output: 0,
+              cacheRead: 0,
+              cacheWrite: 0,
+              totalTokens: 0,
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+            },
+            stopReason: "toolUse",
+            timestamp: 1,
+            content: [
+              { type: "toolCall", id: "call_screenshot", name: "screenshot", arguments: {} },
+            ],
+          },
+          {
+            role: "toolResult",
+            toolCallId: "call_screenshot",
+            toolName: "screenshot",
+            content: [{ type: "image", mimeType: "image/png", data: "aW1n" }],
+            isError: false,
+            timestamp: 2,
+          },
+        ],
+      } satisfies Context,
+      allowedToolCallProviders,
+      { includeSystemPrompt: false },
+    ) as unknown as Array<{ type?: string; output?: unknown }>;
+
+    const functionOutput = input.find((item) => item.type === "function_call_output");
+    expect(functionOutput?.output).toEqual([
+      {
+        type: "input_image",
+        detail: "auto",
+        image_url: "data:image/png;base64,aW1n",
+      },
+    ]);
   });
 
   it("keeps encrypted reasoning replay item ids when requested", () => {
