@@ -14,7 +14,9 @@ RUN --mount=type=cache,id=openclaw-sandbox-bookworm-apt-cache,target=/var/cache/
     python3 \
     ripgrep
 
-RUN useradd --create-home --shell /bin/bash sandbox
+RUN useradd --create-home --shell /bin/bash sandbox \
+  && mkdir -p /workspace \
+  && chown sandbox:sandbox /workspace
 USER sandbox
 WORKDIR /home/sandbox
 

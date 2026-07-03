@@ -10,7 +10,7 @@ import { SANDBOX_AGENT_WORKSPACE_MOUNT } from "./constants.js";
 import { resolveSandboxHostPathViaExistingAncestor } from "./host-paths.js";
 import type { SandboxWorkspaceAccess } from "./types.js";
 
-export const SANDBOX_MOUNT_FORMAT_VERSION = 3;
+export const SANDBOX_MOUNT_FORMAT_VERSION = 4;
 const MATERIALIZED_SANDBOX_SKILLS_WORKSPACE_PARTS = [".openclaw", "sandbox-skills"] as const;
 
 /** Read-only skill directory mounted from the agent workspace into the sandbox workspace. */
@@ -74,7 +74,8 @@ export function resolveReadOnlyWorkspaceSkillMounts(params: {
   // RW workspaces mount the project as writable, but skill sources remain read-only so agent
   // instructions are visible without letting sandbox commands mutate them.
   const materializedSkillsWorkspaceDir =
-    params.skillsWorkspaceDir ?? resolveMaterializedSandboxSkillsWorkspaceDir(params.agentWorkspaceDir);
+    params.skillsWorkspaceDir ??
+    resolveMaterializedSandboxSkillsWorkspaceDir(params.agentWorkspaceDir);
   const mounts = [
     {
       hostPath: path.join(params.agentWorkspaceDir, "skills"),

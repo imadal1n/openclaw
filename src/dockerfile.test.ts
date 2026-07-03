@@ -28,6 +28,17 @@ describe("Dockerfile", () => {
     }
   });
 
+  it("creates the sandbox workspace mountpoint before switching to the sandbox user", async () => {
+    const dockerfile = await readFile(join(repoRoot, "scripts/docker/sandbox/Dockerfile"), "utf8");
+    const workspaceIndex = dockerfile.indexOf("mkdir -p /workspace");
+    const chownIndex = dockerfile.indexOf("chown sandbox:sandbox /workspace");
+    const userIndex = dockerfile.indexOf("USER sandbox");
+
+    expect(workspaceIndex).toBeGreaterThan(-1);
+    expect(chownIndex).toBeGreaterThan(workspaceIndex);
+    expect(userIndex).toBeGreaterThan(chownIndex);
+  });
+
   it("uses full bookworm for build stages and slim bookworm for runtime", async () => {
     const dockerfile = await readFile(dockerfilePath, "utf8");
     expect(dockerfile).toContain(
