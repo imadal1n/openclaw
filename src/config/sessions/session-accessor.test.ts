@@ -37,7 +37,12 @@ import {
   upsertSessionEntry,
 } from "./session-accessor.js";
 import * as sessionStore from "./store.js";
-import { loadSessionStore, saveSessionStore, updateSessionStoreEntry } from "./store.js";
+import {
+  clearSessionStoreCacheForTest,
+  loadSessionStore,
+  saveSessionStore,
+  updateSessionStoreEntry,
+} from "./store.js";
 import { withOwnedSessionTranscriptWrites } from "./transcript-write-context.js";
 import type { SessionEntry } from "./types.js";
 
@@ -443,6 +448,74 @@ describe("session accessor file-backed seam", () => {
     });
     expect(loadSessionEntry({ sessionKey, storePath })).toMatchObject({
       sessionId: "second-session",
+    });
+  });
+
+  it("commits reply session initialization after same-session metadata changes", async () => {
+    const sessionKey = "agent:main:main";
+    const now = Date.now();
+    fs.writeFileSync(
+      storePath,
+      JSON.stringify(
+        {
+          [sessionKey]: {
+            label: "before-metadata-write",
+            sessionId: "same-session",
+            updatedAt: now,
+          },
+        } satisfies Record<string, SessionEntry>,
+        null,
+        2,
+      ),
+      "utf8",
+    );
+    clearSessionStoreCacheForTest();
+    const snapshot = loadReplySessionInitializationSnapshot({ sessionKey, storePath });
+    fs.writeFileSync(
+      storePath,
+      JSON.stringify(
+        {
+          [sessionKey]: {
+            ...snapshot.currentEntry,
+            label: "after-metadata-write",
+            sessionId: "same-session",
+            updatedAt: now + 1,
+          },
+        } satisfies Record<string, SessionEntry>,
+        null,
+        2,
+      ),
+      "utf8",
+    );
+    clearSessionStoreCacheForTest();
+
+    const committed = await commitReplySessionInitialization({
+      activeSessionKey: sessionKey,
+      agentId: "main",
+      expectedRevision: snapshot.revision,
+      previousEntry: snapshot.currentEntry,
+      sessionEntry: {
+        label: snapshot.currentEntry?.label,
+        sessionId: "same-session",
+        updatedAt: now + 2,
+      },
+      sessionKey,
+      storePath,
+    });
+
+    expect(committed.ok).toBe(true);
+    if (!committed.ok) {
+      throw new Error("expected same-session metadata churn to commit");
+    }
+    expect(committed.sessionEntry).toMatchObject({
+      label: "after-metadata-write",
+      sessionId: "same-session",
+      updatedAt: now + 2,
+    });
+    expect(loadSessionEntry({ sessionKey, storePath })).toMatchObject({
+      label: "after-metadata-write",
+      sessionId: "same-session",
+      updatedAt: now + 2,
     });
   });
 

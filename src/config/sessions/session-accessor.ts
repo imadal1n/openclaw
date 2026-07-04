@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import {
   acquireSessionWriteLock,
   resolveSessionWriteLockOptions,
@@ -972,8 +973,100 @@ function cloneSessionEntries(store: Record<string, SessionEntry>): Record<string
   );
 }
 
+function collectSessionEntryKeys(...entries: SessionEntry[]): Array<keyof SessionEntry> {
+  const keys = new Set<keyof SessionEntry>();
+  for (const entry of entries) {
+    for (const key of Object.keys(entry) as Array<keyof SessionEntry>) {
+      keys.add(key);
+    }
+  }
+  return [...keys];
+}
+
+function sessionEntryFieldEqual(
+  left: SessionEntry[keyof SessionEntry],
+  right: SessionEntry[keyof SessionEntry],
+): boolean {
+  return Object.is(left, right) || isDeepStrictEqual(left, right);
+}
+
+function sessionEntryFieldUnset(
+  hasValue: boolean,
+  value: SessionEntry[keyof SessionEntry],
+): boolean {
+  return !hasValue || value === undefined;
+}
+
+function sessionEntryFieldUnchanged(params: {
+  leftHasValue: boolean;
+  leftValue: SessionEntry[keyof SessionEntry];
+  rightHasValue: boolean;
+  rightValue: SessionEntry[keyof SessionEntry];
+}): boolean {
+  const { leftHasValue, leftValue, rightHasValue, rightValue } = params;
+  if (
+    sessionEntryFieldUnset(leftHasValue, leftValue) &&
+    sessionEntryFieldUnset(rightHasValue, rightValue)
+  ) {
+    return true;
+  }
+  return leftHasValue === rightHasValue && sessionEntryFieldEqual(leftValue, rightValue);
+}
+
+function mergeConcurrentReplySessionMetadata(params: {
+  currentEntry: SessionEntry;
+  preparedEntry: SessionEntry;
+  snapshotEntry?: SessionEntry;
+}): SessionEntry {
+  const { currentEntry, preparedEntry, snapshotEntry } = params;
+  if (!snapshotEntry || preparedEntry.sessionId !== snapshotEntry.sessionId) {
+    return preparedEntry;
+  }
+  const merged: SessionEntry = { ...preparedEntry };
+  const mergedFields = merged as Partial<
+    Record<keyof SessionEntry, SessionEntry[keyof SessionEntry]>
+  >;
+  for (const key of collectSessionEntryKeys(currentEntry, preparedEntry, snapshotEntry)) {
+    const currentHasValue = Object.hasOwn(currentEntry, key);
+    const snapshotHasValue = Object.hasOwn(snapshotEntry, key);
+    const preparedHasValue = Object.hasOwn(preparedEntry, key);
+    const currentValue = currentEntry[key];
+    const snapshotValue = snapshotEntry[key];
+    const preparedValue = preparedEntry[key];
+    const currentChanged = !sessionEntryFieldUnchanged({
+      leftHasValue: currentHasValue,
+      leftValue: currentValue,
+      rightHasValue: snapshotHasValue,
+      rightValue: snapshotValue,
+    });
+    const preparedKeptSnapshot = sessionEntryFieldUnchanged({
+      leftHasValue: preparedHasValue,
+      leftValue: preparedValue,
+      rightHasValue: snapshotHasValue,
+      rightValue: snapshotValue,
+    });
+    if (currentChanged && preparedKeptSnapshot) {
+      if (currentHasValue) {
+        mergedFields[key] = currentValue;
+      } else {
+        delete mergedFields[key];
+      }
+    }
+  }
+  return merged;
+}
+
 function createReplySessionInitializationRevision(entry: SessionEntry | undefined): string {
-  return JSON.stringify(entry ?? null);
+  if (!entry) {
+    return JSON.stringify(null);
+  }
+  const revisionEntry: Pick<SessionEntry, "sessionFile" | "sessionId"> = {
+    sessionId: entry.sessionId,
+  };
+  if (entry.sessionFile !== undefined) {
+    revisionEntry.sessionFile = entry.sessionFile;
+  }
+  return JSON.stringify(revisionEntry);
 }
 
 function resolveInitializedReplySessionEntry(params: {
@@ -1415,6 +1508,7 @@ export async function commitReplySessionInitialization(params: {
   retiredEntry?: SessionEntryRetirement;
   sessionEntry: SessionEntry;
   sessionKey: string;
+  snapshotEntry?: SessionEntry;
   storePath: string;
 }): Promise<ReplySessionInitializationCommitResult> {
   const committed = await updateSessionStore(
@@ -1450,7 +1544,13 @@ export async function commitReplySessionInitialization(params: {
         sessionEntry: preparedSessionEntry,
         storePath: params.storePath,
       });
-      store[resolved.normalizedKey] = sessionEntry;
+      store[resolved.normalizedKey] = currentEntry
+        ? mergeConcurrentReplySessionMetadata({
+            currentEntry,
+            preparedEntry: sessionEntry,
+            snapshotEntry: params.snapshotEntry ?? params.previousEntry,
+          })
+        : sessionEntry;
       if (params.retiredEntry) {
         store[params.retiredEntry.key] = params.retiredEntry.entry;
       }
