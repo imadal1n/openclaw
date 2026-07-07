@@ -3,12 +3,15 @@
  *
  * Removes stale runtime containers and browser bridges on a best-effort schedule.
  */
+import * as fs from "node:fs/promises";
+import path from "node:path";
 import { getRuntimeConfig } from "../../config/config.js";
 import { stopBrowserBridgeServer } from "../../plugin-sdk/browser-bridge.js";
 import { defaultRuntime } from "../../runtime.js";
 import { asDateTimestampMs } from "../../shared/number-coercion.js";
 import { getSandboxBackendManager } from "./backend.js";
 import { BROWSER_BRIDGES } from "./browser-bridges.js";
+import { SANDBOX_STATE_DIR } from "./constants.js";
 import { dockerSandboxBackendManager } from "./docker-backend.js";
 import {
   readBrowserRegistry,
@@ -18,6 +21,7 @@ import {
   type SandboxBrowserRegistryEntry,
   type SandboxRegistryEntry,
 } from "./registry.js";
+import { resolveSandboxWorkspaceDir } from "./shared.js";
 import type { SandboxConfig } from "./types.js";
 
 let lastPruneAtMs = 0;
@@ -44,6 +48,59 @@ function shouldPruneSandboxEntry(cfg: SandboxConfig, now: number, entry: Pruneab
   );
 }
 
+function formatPruneErrorMessage(error: unknown): string {
+  return error instanceof Error
+    ? error.message
+    : typeof error === "string"
+      ? error
+      : JSON.stringify(error);
+}
+
+function logSandboxPruneRemovalError(entry: { containerName: string }, error: unknown): void {
+  const message = formatPruneErrorMessage(error);
+  defaultRuntime.error?.(
+    `Sandbox prune failed to remove ${entry.containerName}: ${message ?? "unknown error"}`,
+  );
+}
+
+function hasRemainingSameScopeSibling(params: {
+  entry: SandboxRegistryEntry;
+  entries: readonly SandboxRegistryEntry[];
+  removedRuntimeContainerNames: ReadonlySet<string>;
+  sessionKey: string;
+}): boolean {
+  return params.entries.some(
+    (candidate) =>
+      candidate.containerName !== params.entry.containerName &&
+      candidate.sessionKey === params.sessionKey &&
+      !params.removedRuntimeContainerNames.has(candidate.containerName),
+  );
+}
+
+async function removeSandboxSkillsWorkspaceIfFinalScopeRuntime(params: {
+  entry: SandboxRegistryEntry;
+  entries: readonly SandboxRegistryEntry[];
+  removedRuntimeContainerNames: ReadonlySet<string>;
+}): Promise<void> {
+  const sessionKey = params.entry.sessionKey?.trim();
+  if (!sessionKey) {
+    return;
+  }
+  if (
+    hasRemainingSameScopeSibling({
+      ...params,
+      sessionKey,
+    })
+  ) {
+    return;
+  }
+  const skillsWorkspaceDir = resolveSandboxWorkspaceDir(
+    path.join(SANDBOX_STATE_DIR, "skills-workspaces"),
+    sessionKey,
+  );
+  await fs.rm(skillsWorkspaceDir, { recursive: true, force: true });
+}
+
 /** Removes expired registry entries and their backing runtime resources. */
 async function pruneSandboxRegistryEntries<TEntry extends SandboxRegistryEntry>(params: {
   cfg: SandboxConfig;
@@ -66,15 +123,7 @@ async function pruneSandboxRegistryEntries<TEntry extends SandboxRegistryEntry>(
       await params.remove(entry.containerName);
       await params.onRemoved?.(entry);
     } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : typeof error === "string"
-            ? error
-            : JSON.stringify(error);
-      defaultRuntime.error?.(
-        `Sandbox prune failed to remove ${entry.containerName}: ${message ?? "unknown error"}`,
-      );
+      logSandboxPruneRemovalError(entry, error);
     }
   }
 }
@@ -82,18 +131,33 @@ async function pruneSandboxRegistryEntries<TEntry extends SandboxRegistryEntry>(
 /** Prunes ordinary sandbox runtime containers from the configured backend manager. */
 async function pruneSandboxContainers(cfg: SandboxConfig) {
   const config = getRuntimeConfig();
-  await pruneSandboxRegistryEntries<SandboxRegistryEntry>({
-    cfg,
-    read: readRegistry,
-    remove: removeRegistryEntry,
-    removeRuntime: async (entry) => {
+  const now = Date.now();
+  if (cfg.prune.idleHours === 0 && cfg.prune.maxAgeDays === 0) {
+    return;
+  }
+  const registry = await readRegistry();
+  const removedRuntimeContainerNames = new Set<string>();
+  for (const entry of registry.entries) {
+    if (!shouldPruneSandboxEntry(cfg, now, entry)) {
+      continue;
+    }
+    try {
       const manager = getSandboxBackendManager(entry.backendId ?? "docker");
       await manager?.removeRuntime({
         entry,
         config,
       });
-    },
-  });
+      removedRuntimeContainerNames.add(entry.containerName);
+      await removeSandboxSkillsWorkspaceIfFinalScopeRuntime({
+        entry,
+        entries: registry.entries,
+        removedRuntimeContainerNames,
+      });
+      await removeRegistryEntry(entry.containerName);
+    } catch (error) {
+      logSandboxPruneRemovalError(entry, error);
+    }
+  }
 }
 
 /** Prunes browser bridge containers and closes matching in-process bridge servers. */
@@ -141,12 +205,7 @@ export async function maybePruneSandboxes(cfg: SandboxConfig) {
     await pruneSandboxContainers(cfg);
     await pruneSandboxBrowsers(cfg);
   } catch (error) {
-    const message =
-      error instanceof Error
-        ? error.message
-        : typeof error === "string"
-          ? error
-          : JSON.stringify(error);
+    const message = formatPruneErrorMessage(error);
     defaultRuntime.error?.(`Sandbox prune failed: ${message ?? "unknown error"}`);
   }
 }

@@ -1,7 +1,7 @@
 // Sandbox prune tests cover runtime removal ordering and registry cleanup
 // behavior for stale sandbox entries.
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { SandboxConfig } from "./types.js";
+import { buildPruneConfig } from "./prune.test-fixtures.js";
 
 let maybePruneSandboxes: typeof import("./prune.js").maybePruneSandboxes;
 
@@ -55,54 +55,6 @@ vi.mock("../../plugin-sdk/browser-bridge.js", () => ({
   stopBrowserBridgeServer: vi.fn(),
 }));
 
-function buildPruneConfig(): SandboxConfig {
-  return {
-    mode: "all",
-    backend: "docker",
-    scope: "session",
-    workspaceAccess: "none",
-    workspaceRoot: "/tmp/openclaw-sandboxes",
-    docker: {
-      image: "openclaw-sandbox:bookworm-slim",
-      containerPrefix: "openclaw-sbx-",
-      workdir: "/workspace",
-      readOnlyRoot: true,
-      tmpfs: [],
-      network: "none",
-      capDrop: ["ALL"],
-      env: {},
-    },
-    ssh: {
-      command: "ssh",
-      workspaceRoot: "/tmp/openclaw-sandboxes",
-      strictHostKeyChecking: true,
-      updateHostKeys: true,
-    },
-    browser: {
-      enabled: true,
-      image: "openclaw-sandbox-browser:bookworm-slim",
-      containerPrefix: "openclaw-sbx-browser-",
-      network: "none",
-      cdpPort: 9222,
-      vncPort: 5900,
-      noVncPort: 6080,
-      headless: true,
-      enableNoVnc: false,
-      allowHostControl: false,
-      autoStart: true,
-      autoStartTimeoutMs: 1_000,
-    },
-    tools: {
-      allow: [],
-      deny: [],
-    },
-    prune: {
-      idleHours: 1,
-      maxAgeDays: 0,
-    },
-  };
-}
-
 describe("maybePruneSandboxes", () => {
   beforeEach(async () => {
     vi.resetModules();
@@ -121,6 +73,7 @@ describe("maybePruneSandboxes", () => {
         {
           containerName: "sandbox-1",
           backendId: "docker",
+          sessionKey: "agent:main",
           createdAtMs: Date.now() - 4 * 60 * 60 * 1000,
           lastUsedAtMs: Date.now() - 2 * 60 * 60 * 1000,
           image: "openclaw-sandbox:bookworm-slim",
@@ -157,6 +110,7 @@ describe("maybePruneSandboxes", () => {
         {
           containerName: "sandbox-out-of-range",
           backendId: "docker",
+          sessionKey: "agent:main",
           createdAtMs: Date.now(),
           lastUsedAtMs: Number.MAX_SAFE_INTEGER,
           image: "openclaw-sandbox:bookworm-slim",
