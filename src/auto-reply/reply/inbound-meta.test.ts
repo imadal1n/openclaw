@@ -349,6 +349,77 @@ describe("buildInboundUserContextPrefix", () => {
     ]);
   });
 
+  it("omits conversation and sender metadata for direct Matrix chats", () => {
+    const text = buildInboundUserContextPrefix({
+      ChatType: "direct",
+      OriginatingChannel: "matrix",
+      Provider: "matrix",
+      Surface: "matrix",
+      OriginatingTo: "room:!direct:example.org",
+      MessageSid: "$matrix-event-id",
+      SenderName: "Mădălin",
+      SenderId: "@madalin:example.org",
+    } as TemplateContext);
+
+    expect(text).not.toContain("Conversation info (untrusted metadata):");
+    expect(text).not.toContain("Sender (untrusted metadata):");
+    expect(text).not.toContain("$matrix-event-id");
+    expect(text).not.toContain("@madalin:example.org");
+  });
+
+  it("omits conversation and sender metadata when direct Matrix is inferred from Provider", () => {
+    const text = buildInboundUserContextPrefix({
+      ChatType: "direct",
+      Provider: "matrix",
+      MessageSid: "$provider-only-event-id",
+      SenderName: "Mădălin",
+      SenderId: "@madalin:example.org",
+    } as TemplateContext);
+
+    expect(text).not.toContain("Conversation info (untrusted metadata):");
+    expect(text).not.toContain("Sender (untrusted metadata):");
+  });
+
+  it("keeps Matrix direct reply and history context without conversation or sender metadata", () => {
+    const text = buildInboundUserContextPrefix({
+      ChatType: "direct",
+      OriginatingChannel: "matrix",
+      ReplyToSender: "Sona",
+      ReplyToBody: "quoted Matrix context",
+      InboundHistory: [{ sender: "Mădălin", timestamp: 1_770_000_000_000, body: "previous" }],
+      SenderName: "Mădălin",
+      SenderId: "@madalin:example.org",
+    } as TemplateContext);
+
+    expect(text).not.toContain("Conversation info (untrusted metadata):");
+    expect(text).not.toContain("Sender (untrusted metadata):");
+    expect(parseReplyPayload(text)).toEqual({
+      sender_label: "Sona",
+      body: "quoted Matrix context",
+    });
+    expect(parseHistoryPayload(text)).toEqual([
+      {
+        sender: "Mădălin",
+        timestamp_ms: 1_770_000_000_000,
+        body: "previous",
+      },
+    ]);
+  });
+
+  it("keeps conversation and sender metadata for Matrix channel chats", () => {
+    const text = buildInboundUserContextPrefix({
+      ChatType: "channel",
+      OriginatingChannel: "matrix",
+      MessageSid: "$room-event-id",
+      SenderName: "Mădălin",
+      SenderId: "@madalin:example.org",
+      ConversationLabel: "Sona Matrix room",
+    } as TemplateContext);
+
+    expect(parseConversationInfoPayload(text)["message_id"]).toBe("$room-event-id");
+    expect(parseSenderInfoPayload(text)["label"]).toBe("Mădălin (@madalin:example.org)");
+  });
+
   it("adds delivery guidance beside inbound source context for message-tool-only turns", () => {
     const text = buildInboundUserContextPrefix(
       {

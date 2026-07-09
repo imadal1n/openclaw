@@ -560,9 +560,13 @@ export function buildInboundUserContextPrefix(
   const normalizedDirectChannelValue = directChannelValue
     ? (normalizeAnyChannelId(directChannelValue) ?? directChannelValue)
     : undefined;
-  const isWhatsAppDirect = isDirect && normalizedDirectChannelValue === "whatsapp";
+  const shouldSuppressDirectParticipantMetadata =
+    isDirect &&
+    (normalizedDirectChannelValue === "whatsapp" || normalizedDirectChannelValue === "matrix");
   const includeDirectConversationInfo = Boolean(
-    directChannelValue && normalizedDirectChannelValue !== "webchat" && !isWhatsAppDirect,
+    directChannelValue &&
+    normalizedDirectChannelValue !== "webchat" &&
+    !shouldSuppressDirectParticipantMetadata,
   );
   const shouldIncludeConversationInfo = !isDirect || includeDirectConversationInfo;
 
@@ -633,7 +637,10 @@ export function buildInboundUserContextPrefix(
     history_media_count: historyMediaCount > 0 ? historyMediaCount : undefined,
     history_truncated: inboundHistory.length > MAX_UNTRUSTED_HISTORY_ENTRIES ? true : undefined,
   };
-  if (!isWhatsAppDirect && Object.values(conversationInfo).some((v) => v !== undefined)) {
+  if (
+    !shouldSuppressDirectParticipantMetadata &&
+    Object.values(conversationInfo).some((v) => v !== undefined)
+  ) {
     blocks.push(
       formatUntrustedJsonBlock("Conversation info (untrusted metadata):", conversationInfo),
     );
@@ -653,7 +660,7 @@ export function buildInboundUserContextPrefix(
     tag: normalizePromptMetadataString(ctx.SenderTag),
     e164: normalizePromptMetadataString(ctx.SenderE164),
   };
-  if (senderInfo?.label && !isWhatsAppDirect) {
+  if (senderInfo?.label && !shouldSuppressDirectParticipantMetadata) {
     blocks.push(formatUntrustedJsonBlock("Sender (untrusted metadata):", senderInfo));
   }
 
