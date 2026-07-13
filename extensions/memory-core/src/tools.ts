@@ -20,6 +20,7 @@ import {
   resolveMemoryDeepDreamingConfig,
 } from "openclaw/plugin-sdk/memory-core-host-status";
 import { asRecord } from "./dreaming-shared.js";
+import { SKW_MEMORY_ADAPTER_UNWIRED } from "./memory/skw-unwired-message.js";
 import { filterMemorySearchHitsBySessionVisibility } from "./session-search-visibility.js";
 import { recordShortTermRecalls } from "./short-term-promotion.js";
 import {
@@ -418,6 +419,10 @@ export function createMemorySearchTool(options: {
             const { resolveMemoryBackendConfig } = await loadMemoryToolRuntime();
             const shouldQuerySupplements = requestedCorpus === "wiki" || requestedCorpus === "all";
             const shouldQueryMemory = requestedCorpus !== "wiki" && !cooldown;
+            const backendConfig = resolveMemoryBackendConfig({ cfg, agentId });
+            if (backendConfig.backend === "skw" && requestedCorpus !== "wiki") {
+              return jsonResult(buildMemorySearchUnavailableResult(SKW_MEMORY_ADAPTER_UNWIRED));
+            }
             if (cooldown && !shouldQuerySupplements) {
               return jsonResult(buildMemorySearchUnavailableResult(cooldown.error));
             }
@@ -693,6 +698,14 @@ export function createMemoryGetTool(options: {
           );
         }
         const resolved = resolveMemoryBackendConfig({ cfg, agentId });
+        if (resolved.backend === "skw") {
+          return jsonResult({
+            path: relPath,
+            text: "",
+            disabled: true,
+            error: SKW_MEMORY_ADAPTER_UNWIRED,
+          });
+        }
         if (resolved.backend === "builtin") {
           return await executeMemoryReadResult({
             read: async () =>

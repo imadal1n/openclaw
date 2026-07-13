@@ -140,6 +140,7 @@ import {
   closeMemorySearchManager,
   getMemorySearchManager,
 } from "./search-manager.js";
+import { SKW_MEMORY_ADAPTER_UNWIRED } from "./skw-unwired-message.js";
 const createQmdManagerMock = vi.mocked(QmdMemoryManager["create"]);
 
 type QmdManagerInstance = Awaited<ReturnType<typeof QmdMemoryManager.create>>;
@@ -178,6 +179,13 @@ function createBuiltinCfg(agentId: string): OpenClawConfig {
       list: [{ id: agentId, default: true, workspace: "/tmp/workspace" }],
     },
   } as OpenClawConfig;
+}
+
+function createSkwCfg(agentId: string, skw?: Record<string, unknown>): OpenClawConfig {
+  return {
+    memory: { backend: "skw", skw },
+    agents: { list: [{ id: agentId, default: true, workspace: "/tmp/workspace" }] },
+  };
 }
 
 function requireManager(result: SearchManagerResult): SearchManager {
@@ -1102,5 +1110,50 @@ describe("getMemorySearchManager caching", () => {
     await closeAllMemorySearchManagers();
 
     expect(mockCloseAllMemoryIndexManagers).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("skw backend fail-closed", () => {
+  it("returns manager null with stable message when memory.skw is omitted", async () => {
+    const cfg = createSkwCfg("skw-omitted");
+    const result = await getMemorySearchManager({ cfg, agentId: "skw-omitted" });
+    expect(result.manager).toBeNull();
+    expect(result.error).toBe(SKW_MEMORY_ADAPTER_UNWIRED);
+  });
+
+  it("returns manager null with stable message when memory.skw is empty", async () => {
+    const cfg = createSkwCfg("skw-empty", {});
+    const result = await getMemorySearchManager({ cfg, agentId: "skw-empty" });
+    expect(result.manager).toBeNull();
+    expect(result.error).toBe(SKW_MEMORY_ADAPTER_UNWIRED);
+  });
+
+  it("returns manager null with stable message when skw adapter is empty", async () => {
+    const cfg = createSkwCfg("skw-empty-adapter", { adapter: {} });
+    const result = await getMemorySearchManager({ cfg, agentId: "skw-empty-adapter" });
+    expect(result.manager).toBeNull();
+    expect(result.error).toBe(SKW_MEMORY_ADAPTER_UNWIRED);
+  });
+
+  it("returns manager null with stable message when skw adapter is populated", async () => {
+    const cfg = createSkwCfg("skw-populated", {
+      adapter: {
+        command: "skw-adapter",
+        args: ["--search"],
+        cwd: "/tmp",
+        timeoutMs: 5000,
+      },
+    });
+    const result = await getMemorySearchManager({ cfg, agentId: "skw-populated" });
+    expect(result.manager).toBeNull();
+    expect(result.error).toBe(SKW_MEMORY_ADAPTER_UNWIRED);
+  });
+
+  it("does not invoke qmd binary checks, qmd manager creation, or builtin manager", async () => {
+    const cfg = createSkwCfg("skw-no-side-effects");
+    await getMemorySearchManager({ cfg, agentId: "skw-no-side-effects" });
+    expect(checkQmdBinaryAvailability).not.toHaveBeenCalled();
+    expect(createQmdManagerMock).not.toHaveBeenCalled();
+    expect(mockMemoryIndexGet).not.toHaveBeenCalled();
   });
 });

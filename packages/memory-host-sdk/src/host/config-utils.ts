@@ -15,13 +15,26 @@ export { splitShellArgs } from "./openclaw-runtime-io.js";
 /** Chat shape used by memory send-policy matching. */
 export type ChatType = "direct" | "group" | "channel";
 /** Memory backend selected by user config. */
-export type MemoryBackend = "builtin" | "qmd";
+export type MemoryBackend = "builtin" | "qmd" | "skw";
 /** Citation injection behavior for memory search results. */
 export type MemoryCitationsMode = "auto" | "on" | "off";
 /** QMD command mode used for search calls. */
 export type MemoryQmdSearchMode = "query" | "search" | "vsearch";
 /** QMD startup policy for background indexing. */
 export type MemoryQmdStartupMode = "off" | "idle" | "immediate";
+
+/** SKW adapter command configuration. */
+export type MemorySkwAdapterConfig = {
+  command?: string;
+  args?: string[];
+  cwd?: string;
+  timeoutMs?: number;
+};
+
+/** SKW-specific memory backend config. */
+export type MemorySkwConfig = {
+  adapter?: MemorySkwAdapterConfig;
+};
 
 /** Action returned by a session send-policy rule. */
 export type SessionSendPolicyAction = "allow" | "deny";
@@ -106,6 +119,7 @@ export type MemoryConfig = {
   backend?: MemoryBackend;
   citations?: MemoryCitationsMode;
   qmd?: MemoryQmdConfig;
+  skw?: MemorySkwConfig;
 };
 
 /** Per-agent memory search enablement and extra collection paths. */

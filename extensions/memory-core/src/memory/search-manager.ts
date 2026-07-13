@@ -23,6 +23,7 @@ import {
   type ResolvedQmdConfig,
 } from "openclaw/plugin-sdk/memory-core-host-engine-storage";
 import { normalizeAgentId } from "openclaw/plugin-sdk/routing";
+import { SKW_MEMORY_ADAPTER_UNWIRED } from "./skw-unwired-message.js";
 
 const MEMORY_SEARCH_MANAGER_CACHE_KEY = Symbol.for("openclaw.memorySearchManagerCache");
 type Maybe<T> = T | null;
@@ -155,6 +156,9 @@ export async function getMemorySearchManager(params: {
   purpose?: MemorySearchManagerPurpose;
 }): Promise<MemorySearchManagerResult> {
   const resolved = resolveMemoryBackendConfig(params);
+  if (resolved.backend === "skw") {
+    return { manager: null, error: SKW_MEMORY_ADAPTER_UNWIRED };
+  }
   if (resolved.backend === "qmd" && resolved.qmd) {
     const qmdResolved = resolved.qmd;
     const normalizedAgentId = normalizeAgentId(params.agentId);

@@ -61,6 +61,18 @@ export type ResolvedMemoryBackendConfig = {
   backend: MemoryBackend;
   citations: MemoryCitationsMode;
   qmd?: ResolvedQmdConfig;
+  skw?: ResolvedSkwConfig;
+};
+
+export type ResolvedSkwConfig = {
+  adapter?: ResolvedSkwAdapterConfig;
+};
+
+export type ResolvedSkwAdapterConfig = {
+  command?: string;
+  args: string[];
+  cwd?: string;
+  timeoutMs?: number;
 };
 
 export type ResolvedQmdCollection = {
@@ -425,6 +437,21 @@ export function resolveMemoryBackendConfig(params: {
   const normalizedAgentId = normalizeAgentId(params.agentId);
   const backend = params.cfg.memory?.backend ?? DEFAULT_BACKEND;
   const citations = params.cfg.memory?.citations ?? DEFAULT_CITATIONS;
+  if (backend === "skw") {
+    const skwCfg = params.cfg.memory?.skw;
+    const skw: ResolvedSkwConfig = {};
+    if (skwCfg?.adapter) {
+      skw.adapter = {
+        command: skwCfg.adapter.command,
+        args: Array.isArray(skwCfg.adapter.args)
+          ? skwCfg.adapter.args.filter((value): value is string => typeof value === "string")
+          : [],
+        cwd: skwCfg.adapter.cwd,
+        timeoutMs: resolvePositiveIntegerConfig(skwCfg.adapter.timeoutMs),
+      };
+    }
+    return { backend: "skw", citations, skw: skwCfg ? skw : undefined };
+  }
   if (backend !== "qmd") {
     return { backend: "builtin", citations };
   }

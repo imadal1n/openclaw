@@ -86,6 +86,17 @@ export type MemoryRuntimeQmdConfig = {
   command?: string;
 };
 
+export type MemoryRuntimeSkwAdapterConfig = {
+  command?: string;
+  args: string[];
+  cwd?: string;
+  timeoutMs?: number;
+};
+
+export type MemoryRuntimeSkwConfig = {
+  adapter?: MemoryRuntimeSkwAdapterConfig;
+};
+
 export type MemoryRuntimeBackendConfig =
   | {
       backend: "builtin";
@@ -93,6 +104,10 @@ export type MemoryRuntimeBackendConfig =
   | {
       backend: "qmd";
       qmd?: MemoryRuntimeQmdConfig;
+    }
+  | {
+      backend: "skw";
+      skw?: MemoryRuntimeSkwConfig;
     };
 
 export type MemoryPluginRuntime = {

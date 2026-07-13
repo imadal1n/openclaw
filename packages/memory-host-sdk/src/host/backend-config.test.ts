@@ -593,6 +593,128 @@ describe("resolveMemoryBackendConfig", () => {
   });
 });
 
+describe("skw backend resolution", () => {
+  it("resolves skw backend to explicit backend skw when memory.skw is omitted", () => {
+    const cfg = {
+      agents: { defaults: { workspace: "/tmp/memory-test" } },
+      memory: { backend: "skw" },
+    } as OpenClawConfig;
+    const resolved = resolveMemoryBackendConfig({ cfg, agentId: "main" });
+    expect(resolved.backend).toBe("skw");
+    expect(resolved.citations).toBe("auto");
+    expect(resolved.qmd).toBeUndefined();
+    expect(resolved.skw).toBeUndefined();
+  });
+
+  it("resolves empty skw config to an empty resolved skw object", () => {
+    const cfg = {
+      agents: { defaults: { workspace: "/tmp/memory-test" } },
+      memory: { backend: "skw", skw: {} },
+    } as OpenClawConfig;
+    const resolved = resolveMemoryBackendConfig({ cfg, agentId: "main" });
+    expect(resolved.backend).toBe("skw");
+    expect(resolved.skw).toStrictEqual({});
+  });
+
+  it("resolves omitted skw adapter args to an empty array", () => {
+    const cfg = {
+      agents: { defaults: { workspace: "/tmp/memory-test" } },
+      memory: {
+        backend: "skw",
+        skw: {
+          adapter: {
+            command: "  skw-cli  ",
+            cwd: "/tmp/skw",
+            timeoutMs: 5_000,
+          },
+        },
+      },
+    } as OpenClawConfig;
+    const resolved = resolveMemoryBackendConfig({ cfg, agentId: "main" });
+    expect(resolved.backend).toBe("skw");
+    expect(resolved.skw?.adapter).toStrictEqual({
+      command: "  skw-cli  ",
+      cwd: "/tmp/skw",
+      timeoutMs: 5_000,
+      args: [],
+    });
+  });
+
+  it("preserves provided skw adapter args", () => {
+    const cfg = {
+      agents: { defaults: { workspace: "/tmp/memory-test" } },
+      memory: {
+        backend: "skw",
+        skw: {
+          adapter: {
+            command: "skw-cli",
+            args: ["search", "--top-k", "10"],
+            cwd: "/tmp/skw",
+            timeoutMs: 10_000,
+          },
+        },
+      },
+    } as OpenClawConfig;
+    const resolved = resolveMemoryBackendConfig({ cfg, agentId: "main" });
+    expect(resolved.backend).toBe("skw");
+    expect(resolved.skw?.adapter).toStrictEqual({
+      command: "skw-cli",
+      args: ["search", "--top-k", "10"],
+      cwd: "/tmp/skw",
+      timeoutMs: 10_000,
+    });
+  });
+
+  it("does not invent a default skw command", () => {
+    const cfg = {
+      agents: { defaults: { workspace: "/tmp/memory-test" } },
+      memory: {
+        backend: "skw",
+        skw: {
+          adapter: {
+            args: ["search"],
+          },
+        },
+      },
+    } as OpenClawConfig;
+    const resolved = resolveMemoryBackendConfig({ cfg, agentId: "main" });
+    expect(resolved.skw?.adapter?.command).toBeUndefined();
+    expect(resolved.skw?.adapter?.args).toStrictEqual(["search"]);
+  });
+
+  it("does not spawn or resolve qmd paths for skw backend", () => {
+    const cfg = {
+      agents: { defaults: { workspace: "/tmp/memory-test" } },
+      memory: {
+        backend: "skw",
+        skw: {
+          adapter: {
+            command: "skw-cli",
+          },
+        },
+      },
+    } as OpenClawConfig;
+    const resolved = resolveMemoryBackendConfig({ cfg, agentId: "main" });
+    expect(resolved.backend).toBe("skw");
+    expect(resolved.qmd).toBeUndefined();
+    expect(resolved.skw?.adapter?.command).toBe("skw-cli");
+  });
+
+  it("preserves qmd backend resolution when explicitly configured", () => {
+    const cfg = {
+      agents: { defaults: { workspace: "/tmp/memory-test" } },
+      memory: {
+        backend: "qmd",
+        qmd: {},
+      },
+    } as OpenClawConfig;
+    const resolved = resolveMemoryBackendConfig({ cfg, agentId: "main" });
+    expect(resolved.backend).toBe("qmd");
+    expect(resolved.qmd).toBeDefined();
+    expect(resolved.skw).toBeUndefined();
+  });
+});
+
 describe("memorySearch.extraPaths integration", () => {
   it("maps agents.defaults.memorySearch.extraPaths to QMD collections", () => {
     const cfg = {

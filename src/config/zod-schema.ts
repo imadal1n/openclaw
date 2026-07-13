@@ -231,11 +231,27 @@ const MemoryQmdSchema = z
   })
   .strict();
 
+const MemorySkwAdapterSchema = z
+  .object({
+    command: z.string().trim().min(1).optional(),
+    args: z.array(z.string()).optional(),
+    cwd: z.string().trim().min(1).optional(),
+    timeoutMs: z.number().int().positive().optional(),
+  })
+  .strict();
+
+const MemorySkwSchema = z
+  .object({
+    adapter: MemorySkwAdapterSchema.optional(),
+  })
+  .strict();
+
 const MemorySchema = z
   .object({
-    backend: z.union([z.literal("builtin"), z.literal("qmd")]).optional(),
+    backend: z.union([z.literal("builtin"), z.literal("qmd"), z.literal("skw")]).optional(),
     citations: z.union([z.literal("auto"), z.literal("on"), z.literal("off")]).optional(),
     qmd: MemoryQmdSchema.optional(),
+    skw: MemorySkwSchema.optional(),
   })
   .strict()
   .optional();

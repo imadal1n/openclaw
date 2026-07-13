@@ -100,6 +100,17 @@ describe("startGatewayMemoryBackend", () => {
     expectNoMemoryBackendStartup(log);
   });
 
+  it("skips qmd sidecar work when memory backend is skw", async () => {
+    const cfg = {
+      agents: { list: [{ id: "main", default: true }] },
+      memory: { backend: "skw" },
+    } as unknown as OpenClawConfig;
+
+    const log = await startMemoryBackendForTest(cfg);
+
+    expectNoMemoryBackendStartup(log);
+  });
+
   it("keeps qmd managers lazy when startup refresh is not opted in", async () => {
     const cfg = {
       agents: { list: [{ id: "main", default: true }] },

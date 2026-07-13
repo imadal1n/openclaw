@@ -5,7 +5,7 @@
 import type { SessionSendPolicyConfig } from "./types.base.js";
 
 /** Memory backend family selected for retrieval and session memory features. */
-export type MemoryBackend = "builtin" | "qmd";
+export type MemoryBackend = "builtin" | "qmd" | "skw";
 /** Citation rendering mode for memory-injected context. */
 export type MemoryCitationsMode = "auto" | "on" | "off";
 /** QMD search command flavor used for retrieval. */
@@ -13,11 +13,25 @@ export type MemoryQmdSearchMode = "query" | "search" | "vsearch";
 /** QMD startup/update scheduling mode. */
 export type MemoryQmdStartupMode = "off" | "idle" | "immediate";
 
+/** SKW adapter command configuration. */
+export type MemorySkwAdapterConfig = {
+  command?: string;
+  args?: string[];
+  cwd?: string;
+  timeoutMs?: number;
+};
+
+/** SKW-specific memory backend config. */
+export type MemorySkwConfig = {
+  adapter?: MemorySkwAdapterConfig;
+};
+
 /** Top-level memory config block. */
 export type MemoryConfig = {
   backend?: MemoryBackend;
   citations?: MemoryCitationsMode;
   qmd?: MemoryQmdConfig;
+  skw?: MemorySkwConfig;
 };
 
 /** QMD-specific memory backend config. */

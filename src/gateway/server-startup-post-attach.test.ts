@@ -801,6 +801,9 @@ describe("startGatewayPostAttachRuntime", () => {
         memory: { backend: "qmd", qmd: { update: { startup: "immediate", onBoot: false } } },
       } as never),
     ).toEqual({ mode: "immediate" });
+    expect(
+      testing.resolveGatewayMemoryStartupPolicy({ memory: { backend: "skw" } } as never),
+    ).toEqual({ mode: "off" });
   });
 
   it("allows qmd startup initialization when manager-start boot sync is disabled", async () => {
@@ -866,6 +869,31 @@ describe("startGatewayPostAttachRuntime", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("does not start the qmd memory backend when memory backend is skw", async () => {
+    await startGatewaySidecars({
+      cfg: {
+        hooks: { internal: { enabled: false } },
+        memory: { backend: "skw" },
+      } as never,
+      pluginRegistry: createPostAttachParams().pluginRegistry,
+      defaultWorkspaceDir: "/tmp/openclaw-workspace",
+      deps: {} as never,
+      startChannels: vi.fn(async () => {}),
+      log: { warn: vi.fn() },
+      logHooks: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+      },
+      logChannels: {
+        info: vi.fn(),
+        error: vi.fn(),
+      },
+    });
+
+    expect(hoisted.startGatewayMemoryBackend).not.toHaveBeenCalled();
   });
 
   it("cleans startup session locks with bounded concurrency", async () => {

@@ -556,3 +556,159 @@ describe("config schema regressions", () => {
     expect(res.ok).toBe(false);
   });
 });
+
+describe("memory.skw schema", () => {
+  it("accepts backend skw with omitted memory.skw", () => {
+    const res = validateConfigObject({
+      memory: {
+        backend: "skw",
+      },
+    });
+
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.config.memory?.backend).toBe("skw");
+    }
+  });
+
+  it("accepts empty memory.skw", () => {
+    const res = validateConfigObject({
+      memory: {
+        backend: "skw",
+        skw: {},
+      },
+    });
+
+    expect(res.ok).toBe(true);
+  });
+
+  it("accepts memory.skw.adapter with all optional fields", () => {
+    const res = validateConfigObject({
+      memory: {
+        backend: "skw",
+        skw: {
+          adapter: {
+            command: "skw-cli",
+            args: ["search"],
+            cwd: "/tmp/skw",
+            timeoutMs: 5_000,
+          },
+        },
+      },
+    });
+
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.config.memory?.skw?.adapter?.command).toBe("skw-cli");
+      expect(res.config.memory?.skw?.adapter?.args).toStrictEqual(["search"]);
+      expect(res.config.memory?.skw?.adapter?.cwd).toBe("/tmp/skw");
+      expect(res.config.memory?.skw?.adapter?.timeoutMs).toBe(5_000);
+    }
+  });
+
+  it("rejects unknown keys under memory.skw", () => {
+    const res = validateConfigObject({
+      memory: {
+        backend: "skw",
+        skw: {
+          unknownKey: true,
+        },
+      },
+    });
+
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(
+        res.issues.some(
+          (issue) => issue.path === "memory.skw" && issue.message.includes("unknownKey"),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("rejects unknown keys under memory.skw.adapter", () => {
+    const res = validateConfigObject({
+      memory: {
+        backend: "skw",
+        skw: {
+          adapter: {
+            command: "skw-cli",
+            unknownKey: true,
+          },
+        },
+      },
+    });
+
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(
+        res.issues.some(
+          (issue) => issue.path === "memory.skw.adapter" && issue.message.includes("unknownKey"),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("rejects non-positive skw adapter timeoutMs", () => {
+    const res = validateConfigObject({
+      memory: {
+        backend: "skw",
+        skw: {
+          adapter: {
+            timeoutMs: 0,
+          },
+        },
+      },
+    });
+
+    expect(res.ok).toBe(false);
+  });
+
+  it("rejects empty or whitespace-only skw adapter command", () => {
+    const res = validateConfigObject({
+      memory: {
+        backend: "skw",
+        skw: {
+          adapter: {
+            command: "   ",
+          },
+        },
+      },
+    });
+
+    expect(res.ok).toBe(false);
+  });
+
+  it("rejects non-string array skw adapter args", () => {
+    const res = validateConfigObject({
+      memory: {
+        backend: "skw",
+        skw: {
+          adapter: {
+            args: [1, 2, 3] as unknown as string[],
+          },
+        },
+      },
+    });
+
+    expect(res.ok).toBe(false);
+  });
+
+  it("preserves qmd memory schema acceptance", () => {
+    const res = validateConfigObject({
+      memory: {
+        backend: "qmd",
+        qmd: {
+          command: "qmd",
+          searchMode: "search",
+        },
+      },
+    });
+
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.config.memory?.backend).toBe("qmd");
+      expect(res.config.memory?.qmd?.command).toBe("qmd");
+    }
+  });
+});

@@ -6,12 +6,14 @@ import {
   getMemorySearchManagerMockConfigs,
   getMemorySearchManagerMockParams,
   getMemorySyncMockCalls,
+  getReadAgentMemoryFileMockCalls,
   resetMemoryToolMockState,
   setMemoryBackend,
   setMemoryCustomStatus,
   setMemorySearchImpl,
   setMemorySearchManagerImpl,
 } from "./memory-tool-manager.test-mocks.js";
+import { SKW_MEMORY_ADAPTER_UNWIRED } from "./memory/skw-unwired-message.js";
 import { createMemorySearchTool, testing as memoryToolsTesting } from "./tools.js";
 import {
   buildMemorySearchUnavailableResult,
@@ -20,6 +22,7 @@ import {
 } from "./tools.shared.js";
 import {
   asOpenClawConfig,
+  createMemoryGetToolOrThrow,
   createMemorySearchToolOrThrow,
   expectUnavailableMemorySearchDetails,
 } from "./tools.test-helpers.js";
@@ -609,5 +612,120 @@ describe("memory_search corpus labels", () => {
         source: "sessions",
       },
     ]);
+  });
+});
+
+describe("memory_search skw fail-closed", () => {
+  beforeEach(() => {
+    resetMemoryToolMockState({ searchImpl: async () => [] });
+    memoryToolsTesting.resetMemorySearchToolCooldowns();
+    setMemoryBackend("skw");
+  });
+
+  it("returns unavailable for default corpus", async () => {
+    const tool = createMemorySearchToolOrThrow();
+    const result = await tool.execute("skw-default", { query: "hello" });
+    expectUnavailableMemorySearchDetails(result.details, {
+      error: SKW_MEMORY_ADAPTER_UNWIRED,
+      warning: "Memory search is unavailable due to an embedding/provider error.",
+      action: "Check embedding provider configuration and retry memory_search.",
+    });
+    expect(getMemorySearchManagerMockCalls()).toBe(0);
+  });
+
+  it("returns unavailable for memory corpus", async () => {
+    const tool = createMemorySearchToolOrThrow();
+    const result = await tool.execute("skw-memory", { query: "hello", corpus: "memory" });
+    expectUnavailableMemorySearchDetails(result.details, {
+      error: SKW_MEMORY_ADAPTER_UNWIRED,
+      warning: "Memory search is unavailable due to an embedding/provider error.",
+      action: "Check embedding provider configuration and retry memory_search.",
+    });
+    expect(getMemorySearchManagerMockCalls()).toBe(0);
+  });
+
+  it("returns unavailable for all corpus", async () => {
+    const tool = createMemorySearchToolOrThrow();
+    const result = await tool.execute("skw-all", { query: "hello", corpus: "all" });
+    expectUnavailableMemorySearchDetails(result.details, {
+      error: SKW_MEMORY_ADAPTER_UNWIRED,
+      warning: "Memory search is unavailable due to an embedding/provider error.",
+      action: "Check embedding provider configuration and retry memory_search.",
+    });
+    expect(getMemorySearchManagerMockCalls()).toBe(0);
+  });
+
+  it("bypasses memory backend for wiki corpus", async () => {
+    const tool = createMemorySearchToolOrThrow();
+    const result = await tool.execute("skw-wiki", { query: "hello", corpus: "wiki" });
+    expect(result.details).not.toEqual(
+      expect.objectContaining({
+        disabled: true,
+        error: SKW_MEMORY_ADAPTER_UNWIRED,
+      }),
+    );
+    expect(getMemorySearchManagerMockCalls()).toBe(0);
+  });
+});
+
+describe("memory_get skw fail-closed", () => {
+  beforeEach(() => {
+    resetMemoryToolMockState({ searchImpl: async () => [] });
+    setMemoryBackend("skw");
+  });
+
+  it("returns disabled for default corpus", async () => {
+    const tool = createMemoryGetToolOrThrow();
+    const result = await tool.execute("skw-get-default", { path: "MEMORY.md" });
+    expect(result.details).toEqual({
+      path: "MEMORY.md",
+      text: "",
+      disabled: true,
+      error: SKW_MEMORY_ADAPTER_UNWIRED,
+    });
+    expect(getMemorySearchManagerMockCalls()).toBe(0);
+    expect(getReadAgentMemoryFileMockCalls()).toBe(0);
+  });
+
+  it("returns disabled for memory corpus", async () => {
+    const tool = createMemoryGetToolOrThrow();
+    const result = await tool.execute("skw-get-memory", {
+      path: "MEMORY.md",
+      corpus: "memory",
+    });
+    expect(result.details).toEqual({
+      path: "MEMORY.md",
+      text: "",
+      disabled: true,
+      error: SKW_MEMORY_ADAPTER_UNWIRED,
+    });
+    expect(getMemorySearchManagerMockCalls()).toBe(0);
+    expect(getReadAgentMemoryFileMockCalls()).toBe(0);
+  });
+
+  it("returns disabled for all corpus", async () => {
+    const tool = createMemoryGetToolOrThrow();
+    const result = await tool.execute("skw-get-all", { path: "MEMORY.md", corpus: "all" });
+    expect(result.details).toEqual({
+      path: "MEMORY.md",
+      text: "",
+      disabled: true,
+      error: SKW_MEMORY_ADAPTER_UNWIRED,
+    });
+    expect(getMemorySearchManagerMockCalls()).toBe(0);
+    expect(getReadAgentMemoryFileMockCalls()).toBe(0);
+  });
+
+  it("bypasses memory backend for wiki corpus", async () => {
+    const tool = createMemoryGetToolOrThrow();
+    const result = await tool.execute("skw-get-wiki", { path: "MEMORY.md", corpus: "wiki" });
+    expect(result.details).toEqual({
+      path: "MEMORY.md",
+      text: "",
+      disabled: true,
+      error: "wiki corpus result not found",
+    });
+    expect(getMemorySearchManagerMockCalls()).toBe(0);
+    expect(getReadAgentMemoryFileMockCalls()).toBe(0);
   });
 });
