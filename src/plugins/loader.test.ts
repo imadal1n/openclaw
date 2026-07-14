@@ -3238,6 +3238,21 @@ module.exports = { id: "throws-after-import", register() {} };`,
       resolveMemoryBackendConfig() {
         return { backend: "builtin" as const };
       },
+      getMemoryRuntimeStatus() {
+        return { backend: "builtin" as const, ready: true };
+      },
+      async probeMemoryRuntime() {
+        return { ok: true, latencyMs: 0 };
+      },
+      getMemoryRuntimeCapabilities() {
+        return {
+          backend: "builtin" as const,
+          features: new Set(["search", "get"] as const),
+          writable: false,
+          autoExtract: false,
+          prefetch: false,
+        };
+      },
     };
     registerMemoryCapability("memory-core", {
       promptBuilder: () => ["active memory section"],

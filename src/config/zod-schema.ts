@@ -240,8 +240,60 @@ const MemorySkwAdapterSchema = z
   })
   .strict();
 
-const MemorySkwSchema = z
+const SkwProfileLimitsSchema = z
   .object({
+    recallMode: z.enum(["tools-only", "prefetch", "hybrid"]),
+    topK: z.number().int().min(1).max(50),
+    writable: z.boolean(),
+    autoExtract: z.boolean(),
+    extractor: z.enum(["pattern", "llm"]),
+    maxWriteCharacters: z.number().int().min(1).max(16_384),
+    maxInjectedCharacters: z.number().int().min(1).max(12_000),
+    maxInjectedTokens: z.number().int().min(0).max(3000),
+    minTurnsBetweenAttempts: z.number().int().min(0).max(100),
+    candidatePoolSize: z.number().int().min(1).max(200),
+    rerankThreshold: z.number().min(0).max(1),
+    maxChunksPerSource: z.number().int().min(1).max(20),
+    defaultTrust: z.number().min(0).max(1),
+    minTrust: z.number().min(0).max(1),
+    temporalDecayHalfLife: z.number().int().min(0).max(3650),
+    rerankerModel: z.string().min(1),
+    rerankerCacheDir: z.string().min(1),
+  })
+  .strict();
+
+export const SkwProfileDefinitionSchema = z
+  .object({
+    databasePath: z.string().min(1),
+    memoryDatabasePath: z.string().min(1),
+    sessionMapPath: z.string().min(1),
+    cachePath: z.string().min(1),
+    allowedCollections: z.array(z.string().min(1)).optional(),
+    allowedSourceRoots: z.array(z.string().min(1)).optional(),
+    limits: SkwProfileLimitsSchema,
+  })
+  .strict();
+
+export const MemoryAgentSkwSchema = z
+  .object({
+    profile: z.string().min(1).optional(),
+    writable: z.boolean().optional(),
+    autoExtract: z.boolean().optional(),
+    prefetch: z.boolean().optional(),
+  })
+  .strict();
+
+export const MemoryAgentBackendSchema = z
+  .object({
+    backend: z.union([z.literal("builtin"), z.literal("qmd"), z.literal("skw")]).optional(),
+    skw: MemoryAgentSkwSchema.optional(),
+  })
+  .strict();
+
+export const MemorySkwSchema = z
+  .object({
+    profiles: z.record(z.string(), z.string()).optional(),
+    profileDefinitions: z.record(z.string(), SkwProfileDefinitionSchema).optional(),
     adapter: MemorySkwAdapterSchema.optional(),
   })
   .strict();
@@ -252,6 +304,7 @@ const MemorySchema = z
     citations: z.union([z.literal("auto"), z.literal("on"), z.literal("off")]).optional(),
     qmd: MemoryQmdSchema.optional(),
     skw: MemorySkwSchema.optional(),
+    agents: z.record(z.string(), MemoryAgentBackendSchema).optional(),
   })
   .strict()
   .optional();

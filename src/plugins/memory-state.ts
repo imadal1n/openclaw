@@ -110,6 +110,30 @@ export type MemoryRuntimeBackendConfig =
       skw?: MemoryRuntimeSkwConfig;
     };
 
+export type MemoryRuntimeStatus = {
+  backend: MemoryRuntimeBackendConfig["backend"];
+  profile?: string;
+  ready: boolean;
+  lastError?: string;
+  lastProbeAtMs?: number;
+};
+
+export type MemoryRuntimeProbeResult = {
+  ok: boolean;
+  error?: string;
+  latencyMs: number;
+};
+
+export type MemoryRuntimeCapability = "search" | "get" | "write" | "autoExtract" | "prefetch";
+
+export type MemoryRuntimeCapabilities = {
+  backend: MemoryRuntimeBackendConfig["backend"];
+  features: Set<MemoryRuntimeCapability>;
+  writable: boolean;
+  autoExtract: boolean;
+  prefetch: boolean;
+};
+
 export type MemoryPluginRuntime = {
   getMemorySearchManager(params: {
     cfg: OpenClawConfig;
@@ -123,6 +147,15 @@ export type MemoryPluginRuntime = {
     cfg: OpenClawConfig;
     agentId: string;
   }): MemoryRuntimeBackendConfig;
+  getMemoryRuntimeStatus(params: { cfg: OpenClawConfig; agentId: string }): MemoryRuntimeStatus;
+  probeMemoryRuntime(params: {
+    cfg: OpenClawConfig;
+    agentId: string;
+  }): Promise<MemoryRuntimeProbeResult>;
+  getMemoryRuntimeCapabilities(params: {
+    cfg: OpenClawConfig;
+    agentId: string;
+  }): MemoryRuntimeCapabilities;
   closeMemorySearchManager?(params: { cfg: OpenClawConfig; agentId: string }): Promise<void>;
   closeAllMemorySearchManagers?(): Promise<void>;
 };

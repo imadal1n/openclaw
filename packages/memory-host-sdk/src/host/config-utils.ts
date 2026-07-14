@@ -31,8 +31,56 @@ export type MemorySkwAdapterConfig = {
   timeoutMs?: number;
 };
 
+/** Limits declared for one SKW profile; agent policy may only tighten these. */
+export type SkwProfileLimits = {
+  recallMode: "tools-only" | "prefetch" | "hybrid";
+  topK: number;
+  writable: boolean;
+  autoExtract: boolean;
+  extractor: "pattern" | "llm";
+  maxWriteCharacters: number;
+  maxInjectedCharacters: number;
+  maxInjectedTokens: number;
+  minTurnsBetweenAttempts: number;
+  candidatePoolSize: number;
+  rerankThreshold: number;
+  maxChunksPerSource: number;
+  defaultTrust: number;
+  minTrust: number;
+  temporalDecayHalfLife: number;
+  rerankerModel: string;
+  rerankerCacheDir: string;
+};
+
+/** Nix-owned profile definition; no caller-controlled or runtime-derived paths. */
+export type SkwProfileDefinition = {
+  databasePath: string;
+  memoryDatabasePath: string;
+  sessionMapPath: string;
+  cachePath: string;
+  allowedCollections: string[];
+  allowedSourceRoots: string[];
+  limits: SkwProfileLimits;
+};
+
+/** Per-agent SKW backend policy; references a declared profile by name. */
+export type MemoryAgentSkwConfig = {
+  profile?: string;
+  writable?: boolean;
+  autoExtract?: boolean;
+  prefetch?: boolean;
+};
+
+/** Per-agent memory backend override; exact normalized-agent match before global default. */
+export type MemoryAgentBackendConfig = {
+  backend?: MemoryBackend;
+  skw?: MemoryAgentSkwConfig;
+};
+
 /** SKW-specific memory backend config. */
 export type MemorySkwConfig = {
+  profiles?: Record<string, string>;
+  profileDefinitions?: Record<string, SkwProfileDefinition>;
   adapter?: MemorySkwAdapterConfig;
 };
 
@@ -120,6 +168,7 @@ export type MemoryConfig = {
   citations?: MemoryCitationsMode;
   qmd?: MemoryQmdConfig;
   skw?: MemorySkwConfig;
+  agents?: Record<string, MemoryAgentBackendConfig>;
 };
 
 /** Per-agent memory search enablement and extra collection paths. */

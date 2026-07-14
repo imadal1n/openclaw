@@ -143,6 +143,10 @@ export type {
   MemoryPluginPublicArtifactsProvider,
   MemoryPluginRuntime,
   MemoryPromptSectionBuilder,
+  MemoryRuntimeCapabilities,
+  MemoryRuntimeCapability,
+  MemoryRuntimeProbeResult,
+  MemoryRuntimeStatus,
 } from "../../../../src/plugins/memory-state.js";
 export type { OpenClawPluginApi } from "../../../../src/plugins/types.js";
 

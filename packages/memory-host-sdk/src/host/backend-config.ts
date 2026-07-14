@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   CANONICAL_ROOT_MEMORY_FILENAME,
+  type MemoryAgentBackendConfig,
   type MemoryBackend,
   type MemoryCitationsMode,
   type MemoryQmdConfig,
@@ -17,6 +18,7 @@ import {
   resolveUserPath,
   type SessionSendPolicyConfig,
   splitShellArgs,
+  type SkwProfileDefinition,
 } from "./config-utils.js";
 import { isPathInside } from "./fs-utils.js";
 import {
@@ -65,7 +67,16 @@ export type ResolvedMemoryBackendConfig = {
 };
 
 export type ResolvedSkwConfig = {
+  profiles: Record<string, string>;
+  profileDefinitions?: Record<string, SkwProfileDefinition>;
   adapter?: ResolvedSkwAdapterConfig;
+  profile?: string;
+  profileDefinition?: SkwProfileDefinition;
+  effective?: {
+    writable: boolean;
+    autoExtract: boolean;
+    prefetch: boolean;
+  };
 };
 
 export type ResolvedSkwAdapterConfig = {
@@ -435,37 +446,41 @@ export function resolveMemoryBackendConfig(params: {
   agentId: string;
 }): ResolvedMemoryBackendConfig {
   const normalizedAgentId = normalizeAgentId(params.agentId);
-  const backend = params.cfg.memory?.backend ?? DEFAULT_BACKEND;
+  const normalizedAgents = normalizeMemoryAgents(params.cfg.memory?.agents);
+  const agentOverride = normalizedAgents[normalizedAgentId];
+  const backend = agentOverride?.backend ?? params.cfg.memory?.backend ?? DEFAULT_BACKEND;
   const citations = params.cfg.memory?.citations ?? DEFAULT_CITATIONS;
-  if (backend === "skw") {
-    const skwCfg = params.cfg.memory?.skw;
-    const skw: ResolvedSkwConfig = {};
-    if (skwCfg?.adapter) {
-      skw.adapter = {
-        command: skwCfg.adapter.command,
-        args: Array.isArray(skwCfg.adapter.args)
-          ? skwCfg.adapter.args.filter((value): value is string => typeof value === "string")
-          : [],
-        cwd: skwCfg.adapter.cwd,
-        timeoutMs: resolvePositiveIntegerConfig(skwCfg.adapter.timeoutMs),
-      };
-    }
-    return { backend: "skw", citations, skw: skwCfg ? skw : undefined };
-  }
-  if (backend !== "qmd") {
+
+  if (backend === "builtin") {
     return { backend: "builtin", citations };
   }
 
-  const workspaceDir = resolveAgentWorkspaceDir(params.cfg, normalizedAgentId);
-  const qmdCfg = params.cfg.memory?.qmd;
+  if (backend === "qmd") {
+    return resolveQmdBackendConfig(params.cfg, normalizedAgentId, citations);
+  }
+
+  return resolveSkwBackendConfig(
+    params.cfg,
+    normalizedAgentId,
+    normalizedAgents,
+    agentOverride,
+    citations,
+  );
+}
+
+function resolveQmdBackendConfig(
+  cfg: OpenClawConfig,
+  agentId: string,
+  citations: MemoryCitationsMode,
+): ResolvedMemoryBackendConfig {
+  const workspaceDir = resolveAgentWorkspaceDir(cfg, agentId);
+  const qmdCfg = cfg.memory?.qmd;
   const includeDefaultMemory = qmdCfg?.includeDefaultMemory !== false;
   const nameSet = new Set<string>();
-  const agentEntry = params.cfg.agents?.list?.find(
-    (entry) => normalizeAgentId(entry?.id) === normalizedAgentId,
-  );
+  const agentEntry = cfg.agents?.list?.find((entry) => normalizeAgentId(entry?.id) === agentId);
   const mergedExtraPaths = normalizeStringEntries(
     [
-      ...(params.cfg.agents?.defaults?.memorySearch?.extraPaths ?? []),
+      ...(cfg.agents?.defaults?.memorySearch?.extraPaths ?? []),
       ...(agentEntry?.memorySearch?.extraPaths ?? []),
     ].filter((value): value is string => typeof value === "string"),
   );
@@ -474,14 +489,13 @@ export function resolveMemoryBackendConfig(params: {
     (pathValue): { path: string; pattern?: string; name?: string } => ({ path: pathValue }),
   );
   const mergedExtraCollections = [
-    ...(params.cfg.agents?.defaults?.memorySearch?.qmd?.extraCollections ?? []),
+    ...(cfg.agents?.defaults?.memorySearch?.qmd?.extraCollections ?? []),
     ...(agentEntry?.memorySearch?.qmd?.extraCollections ?? []),
   ].filter(
     (value): value is MemoryQmdIndexPath =>
       value !== null && typeof value === "object" && typeof value.path === "string",
   );
 
-  // Combine QMD-specific paths with extraPaths and per-agent cross-agent collections.
   const allQmdPaths: MemoryQmdIndexPath[] = [
     ...(qmdCfg?.paths ?? []),
     ...searchExtraPaths,
@@ -489,8 +503,8 @@ export function resolveMemoryBackendConfig(params: {
   ];
 
   const collections = [
-    ...resolveDefaultCollections(includeDefaultMemory, workspaceDir, nameSet, normalizedAgentId),
-    ...resolveCustomPaths(allQmdPaths, workspaceDir, nameSet, normalizedAgentId),
+    ...resolveDefaultCollections(includeDefaultMemory, workspaceDir, nameSet, agentId),
+    ...resolveCustomPaths(allQmdPaths, workspaceDir, nameSet, agentId),
   ];
 
   const rawCommand = qmdCfg?.command?.trim() || "qmd";
@@ -529,9 +543,118 @@ export function resolveMemoryBackendConfig(params: {
     scope: qmdCfg?.scope ?? DEFAULT_QMD_SCOPE,
   };
 
-  return {
-    backend: "qmd",
-    citations,
-    qmd: resolved,
-  };
+  return { backend: "qmd", citations, qmd: resolved };
+}
+
+function resolveSkwBackendConfig(
+  cfg: OpenClawConfig,
+  agentId: string,
+  normalizedAgents: Record<string, MemoryAgentBackendConfig>,
+  agentOverride: MemoryAgentBackendConfig | undefined,
+  citations: MemoryCitationsMode,
+): ResolvedMemoryBackendConfig {
+  const skwCfg = cfg.memory?.skw;
+  const profiles = resolveSkwProfiles(skwCfg?.profiles, normalizedAgents);
+  const profileDefinitions = skwCfg?.profileDefinitions;
+  const profileName = agentOverride?.skw?.profile?.trim() ?? profiles[agentId];
+  const profileDefinition = profileDefinitions?.[profileName];
+  if (agentOverride?.backend === "skw") {
+    if (typeof profileName !== "string" || profileName.length === 0) {
+      throw new Error(
+        `memory agent ${agentId} has backend "skw" but no profile mapping; set memory.agents.${agentId}.skw.profile or memory.skw.profiles.${agentId}`,
+      );
+    }
+    if (!profileDefinition) {
+      throw new Error(
+        `memory agent ${agentId} references undeclared skw profile "${profileName}"; add memory.skw.profileDefinitions.${profileName}`,
+      );
+    }
+  }
+
+  const effective = profileDefinition
+    ? {
+        writable:
+          profileDefinition.limits.writable &&
+          (agentOverride?.skw?.writable ?? profileDefinition.limits.writable),
+        autoExtract:
+          profileDefinition.limits.autoExtract &&
+          (agentOverride?.skw?.autoExtract ?? profileDefinition.limits.autoExtract),
+        prefetch: resolveSkwPrefetch(profileDefinition, agentOverride),
+      }
+    : undefined;
+
+  const skw: ResolvedSkwConfig = { profiles, profile: profileName };
+  if (profileDefinitions) {
+    skw.profileDefinitions = profileDefinitions;
+  }
+  if (profileDefinition) {
+    skw.profileDefinition = profileDefinition;
+  }
+  if (effective) {
+    skw.effective = effective;
+  }
+  if (skwCfg?.adapter) {
+    skw.adapter = {
+      command: skwCfg.adapter.command,
+      args: Array.isArray(skwCfg.adapter.args)
+        ? skwCfg.adapter.args.filter((value): value is string => typeof value === "string")
+        : [],
+      cwd: skwCfg.adapter.cwd,
+      timeoutMs: resolvePositiveIntegerConfig(skwCfg.adapter.timeoutMs),
+    };
+  }
+  return { backend: "skw", citations, skw };
+}
+
+function normalizeMemoryAgents(
+  agents: Record<string, MemoryAgentBackendConfig> | undefined,
+): Record<string, MemoryAgentBackendConfig> {
+  if (!agents) {
+    return {};
+  }
+  const normalized: Record<string, MemoryAgentBackendConfig> = {};
+  for (const [key, value] of Object.entries(agents)) {
+    if (!value || typeof value !== "object") {
+      continue;
+    }
+    const normalizedKey = normalizeAgentId(key);
+    if (normalized[normalizedKey] !== undefined) {
+      throw new Error(`duplicate normalized agent key "${normalizedKey}" in memory.agents`);
+    }
+    normalized[normalizedKey] = value;
+  }
+  return normalized;
+}
+
+function resolveSkwPrefetch(
+  profileDefinition: SkwProfileDefinition,
+  agentOverride?: MemoryAgentBackendConfig,
+): boolean {
+  const recallMode = profileDefinition.limits.recallMode;
+  const profileAllowsPrefetch = recallMode === "prefetch" || recallMode === "hybrid";
+  if (!profileAllowsPrefetch) {
+    return false;
+  }
+  return agentOverride?.skw?.prefetch ?? true;
+}
+function resolveSkwProfiles(
+  legacyProfiles: Record<string, string> | undefined,
+  agents: Record<string, MemoryAgentBackendConfig> | undefined,
+): Record<string, string> {
+  const profiles: Record<string, string> = {};
+  if (legacyProfiles) {
+    for (const [key, value] of Object.entries(legacyProfiles)) {
+      if (typeof value === "string" && value.trim().length > 0 && key.trim().length > 0) {
+        profiles[normalizeAgentId(key)] = value.trim();
+      }
+    }
+  }
+  if (agents) {
+    for (const [key, value] of Object.entries(agents)) {
+      if (value?.backend === "skw" && value.skw?.profile?.trim()) {
+        profiles[normalizeAgentId(key)] = value.skw.profile.trim();
+      }
+    }
+  }
+  return profiles;
 }

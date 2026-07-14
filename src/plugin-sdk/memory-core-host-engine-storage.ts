@@ -76,4 +76,5 @@ export type {
   ResolvedMemoryBackendConfig,
   ResolvedQmdConfig,
   ResolvedQmdMcporterConfig,
+  ResolvedSkwConfig,
 } from "../../packages/memory-host-sdk/src/engine-storage.js";

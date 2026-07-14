@@ -18,6 +18,7 @@ import { configureMemoryCoreDreamingState } from "./src/dreaming-state.js";
 import { registerShortTermPromotionDreaming } from "./src/dreaming.js";
 import { buildMemoryFlushPlan } from "./src/flush-plan.js";
 import { buildPromptSection } from "./src/prompt-section.js";
+import { getMemoryRuntimeCapabilities, getMemoryRuntimeStatus } from "./src/runtime-provider.js";
 
 type MemoryToolsModule = typeof import("./src/tools.js");
 type RuntimeProviderModule = typeof import("./src/runtime-provider.js");
@@ -165,6 +166,16 @@ const memoryRuntime: MemoryPluginRuntime = {
   },
   resolveMemoryBackendConfig(params) {
     return resolveMemoryBackendConfig(params);
+  },
+  getMemoryRuntimeStatus(params) {
+    return getMemoryRuntimeStatus(params);
+  },
+  async probeMemoryRuntime(params) {
+    const { memoryRuntime: runtime } = await loadRuntimeProviderModule();
+    return await runtime.probeMemoryRuntime(params);
+  },
+  getMemoryRuntimeCapabilities(params) {
+    return getMemoryRuntimeCapabilities(params);
   },
   async closeAllMemorySearchManagers() {
     const { memoryRuntime: runtime } = await loadRuntimeProviderModule();

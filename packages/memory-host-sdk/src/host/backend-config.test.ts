@@ -597,23 +597,55 @@ describe("skw backend resolution", () => {
   it("resolves skw backend to explicit backend skw when memory.skw is omitted", () => {
     const cfg = {
       agents: { defaults: { workspace: "/tmp/memory-test" } },
-      memory: { backend: "skw" },
+      memory: { backend: "skw", skw: { profiles: { main: "main-profile" } } },
     } as OpenClawConfig;
     const resolved = resolveMemoryBackendConfig({ cfg, agentId: "main" });
     expect(resolved.backend).toBe("skw");
     expect(resolved.citations).toBe("auto");
     expect(resolved.qmd).toBeUndefined();
-    expect(resolved.skw).toBeUndefined();
+    expect(resolved.skw).toStrictEqual({
+      profiles: { main: "main-profile" },
+      profile: "main-profile",
+    });
   });
 
-  it("resolves empty skw config to an empty resolved skw object", () => {
+  it("resolves empty skw config to an empty profiles mapping", () => {
     const cfg = {
       agents: { defaults: { workspace: "/tmp/memory-test" } },
-      memory: { backend: "skw", skw: {} },
+      memory: {
+        backend: "skw",
+        skw: { profiles: { main: "main-profile" } },
+      },
     } as OpenClawConfig;
     const resolved = resolveMemoryBackendConfig({ cfg, agentId: "main" });
     expect(resolved.backend).toBe("skw");
-    expect(resolved.skw).toStrictEqual({});
+    expect(resolved.skw).toStrictEqual({
+      profiles: { main: "main-profile" },
+      profile: "main-profile",
+    });
+  });
+
+  it("resolves skw profiles mapping with normalized agent ids", () => {
+    const cfg = {
+      agents: { defaults: { workspace: "/tmp/memory-test" } },
+      memory: {
+        backend: "skw",
+        skw: {
+          profiles: {
+            main: "main-profile",
+            "Other-Agent": "other-profile",
+            "": "ignored-empty-key",
+            stale: "  stale-profile  ",
+          },
+        },
+      },
+    } as OpenClawConfig;
+    const resolved = resolveMemoryBackendConfig({ cfg, agentId: "main" });
+    expect(resolved.skw?.profiles).toStrictEqual({
+      main: "main-profile",
+      "other-agent": "other-profile",
+      stale: "stale-profile",
+    });
   });
 
   it("resolves omitted skw adapter args to an empty array", () => {
@@ -622,6 +654,7 @@ describe("skw backend resolution", () => {
       memory: {
         backend: "skw",
         skw: {
+          profiles: { main: "main-profile" },
           adapter: {
             command: "  skw-cli  ",
             cwd: "/tmp/skw",
@@ -646,6 +679,7 @@ describe("skw backend resolution", () => {
       memory: {
         backend: "skw",
         skw: {
+          profiles: { main: "main-profile" },
           adapter: {
             command: "skw-cli",
             args: ["search", "--top-k", "10"],
@@ -671,6 +705,7 @@ describe("skw backend resolution", () => {
       memory: {
         backend: "skw",
         skw: {
+          profiles: { main: "main-profile" },
           adapter: {
             args: ["search"],
           },
@@ -688,6 +723,7 @@ describe("skw backend resolution", () => {
       memory: {
         backend: "skw",
         skw: {
+          profiles: { main: "main-profile" },
           adapter: {
             command: "skw-cli",
           },
@@ -712,6 +748,376 @@ describe("skw backend resolution", () => {
     expect(resolved.backend).toBe("qmd");
     expect(resolved.qmd).toBeDefined();
     expect(resolved.skw).toBeUndefined();
+  });
+
+  it("per-agent backend override overrides global default", () => {
+    const cfg = {
+      agents: { defaults: { workspace: "/tmp/memory-test" } },
+      memory: {
+        backend: "qmd",
+        agents: {
+          main: { backend: "skw", skw: { profile: "main-profile" } },
+        },
+        skw: {
+          profileDefinitions: {
+            "main-profile": {
+              databasePath: "/nix/db.sqlite",
+              memoryDatabasePath: "/nix/memory.sqlite",
+              sessionMapPath: "/nix/session.json",
+              cachePath: "/nix/cache",
+              allowedCollections: [],
+              allowedSourceRoots: [],
+              limits: {
+                recallMode: "hybrid",
+                topK: 10,
+                writable: true,
+                autoExtract: true,
+                extractor: "llm",
+                maxWriteCharacters: 1000,
+                maxInjectedCharacters: 2000,
+                maxInjectedTokens: 500,
+                minTurnsBetweenAttempts: 1,
+                candidatePoolSize: 20,
+                rerankThreshold: 0.5,
+                maxChunksPerSource: 3,
+                defaultTrust: 0.8,
+                minTrust: 0.2,
+                temporalDecayHalfLife: 24,
+                rerankerModel: "default",
+                rerankerCacheDir: "/tmp",
+              },
+            },
+          },
+        },
+      },
+    } as OpenClawConfig;
+    const resolved = resolveMemoryBackendConfig({ cfg, agentId: "main" });
+    expect(resolved.backend).toBe("skw");
+    expect(resolved.skw?.profile).toBe("main-profile");
+  });
+
+  it("falls back to global backend when agent has no override", () => {
+    const cfg = {
+      agents: { defaults: { workspace: "/tmp/memory-test" } },
+      memory: {
+        backend: "builtin",
+      },
+    } as OpenClawConfig;
+    const resolved = resolveMemoryBackendConfig({ cfg, agentId: "main" });
+    expect(resolved.backend).toBe("builtin");
+  });
+
+  it("throws when agent skw references an undeclared profile", () => {
+    const cfg = {
+      agents: { defaults: { workspace: "/tmp/memory-test" } },
+      memory: {
+        backend: "skw",
+        agents: {
+          main: { backend: "skw", skw: { profile: "unknown-profile" } },
+        },
+      },
+    } as OpenClawConfig;
+    expect(() => resolveMemoryBackendConfig({ cfg, agentId: "main" })).toThrow(
+      "undeclared skw profile",
+    );
+  });
+
+  it("populates profileDefinition and effective policy from declared profile", () => {
+    const cfg = {
+      agents: { defaults: { workspace: "/tmp/memory-test" } },
+      memory: {
+        backend: "skw",
+        agents: {
+          main: { backend: "skw", skw: { profile: "main-profile", writable: false } },
+        },
+        skw: {
+          profileDefinitions: {
+            "main-profile": {
+              databasePath: "/nix/db.sqlite",
+              memoryDatabasePath: "/nix/memory.sqlite",
+              sessionMapPath: "/nix/session.json",
+              cachePath: "/nix/cache",
+              allowedCollections: [],
+              allowedSourceRoots: [],
+              limits: {
+                recallMode: "hybrid",
+                topK: 10,
+                writable: true,
+                autoExtract: true,
+                extractor: "llm",
+                maxWriteCharacters: 1000,
+                maxInjectedCharacters: 2000,
+                maxInjectedTokens: 500,
+                minTurnsBetweenAttempts: 1,
+                candidatePoolSize: 20,
+                rerankThreshold: 0.5,
+                maxChunksPerSource: 3,
+                defaultTrust: 0.8,
+                minTrust: 0.2,
+                temporalDecayHalfLife: 24,
+                rerankerModel: "default",
+                rerankerCacheDir: "/tmp",
+              },
+            },
+          },
+        },
+      },
+    } as OpenClawConfig;
+    const resolved = resolveMemoryBackendConfig({ cfg, agentId: "main" });
+    expect(resolved.backend).toBe("skw");
+    expect(resolved.skw?.profile).toBe("main-profile");
+    expect(resolved.skw?.profileDefinition?.limits.writable).toBe(true);
+    expect(resolved.skw?.effective?.writable).toBe(false);
+    expect(resolved.skw?.effective?.autoExtract).toBe(true);
+  });
+
+  it("normalizes mixed-case memory.agents keys to match runtime agent id", () => {
+    const cfg = {
+      agents: { defaults: { workspace: "/tmp/memory-test" } },
+      memory: {
+        backend: "builtin",
+        agents: {
+          "Main-Agent": { backend: "skw", skw: { profile: "main-profile" } },
+        },
+        skw: {
+          profileDefinitions: {
+            "main-profile": {
+              databasePath: "/nix/db.sqlite",
+              memoryDatabasePath: "/nix/memory.sqlite",
+              sessionMapPath: "/nix/session.json",
+              cachePath: "/nix/cache",
+              allowedCollections: [],
+              allowedSourceRoots: [],
+              limits: {
+                recallMode: "hybrid",
+                topK: 10,
+                writable: true,
+                autoExtract: true,
+                extractor: "llm",
+                maxWriteCharacters: 1000,
+                maxInjectedCharacters: 2000,
+                maxInjectedTokens: 500,
+                minTurnsBetweenAttempts: 1,
+                candidatePoolSize: 20,
+                rerankThreshold: 0.5,
+                maxChunksPerSource: 3,
+                defaultTrust: 0.8,
+                minTrust: 0.2,
+                temporalDecayHalfLife: 24,
+                rerankerModel: "default",
+                rerankerCacheDir: "/tmp",
+              },
+            },
+          },
+        },
+      },
+    } as OpenClawConfig;
+    const resolved = resolveMemoryBackendConfig({ cfg, agentId: "main-agent" });
+    expect(resolved.backend).toBe("skw");
+    expect(resolved.skw?.profile).toBe("main-profile");
+  });
+
+  it("throws when memory.agents keys collide after normalization", () => {
+    const cfg = {
+      agents: { defaults: { workspace: "/tmp/memory-test" } },
+      memory: {
+        backend: "builtin",
+        agents: {
+          "Main-Agent": { backend: "skw", skw: { profile: "profile-a" } },
+          "main-agent": { backend: "qmd" },
+        },
+      },
+    } as OpenClawConfig;
+    expect(() => resolveMemoryBackendConfig({ cfg, agentId: "main-agent" })).toThrow(
+      "duplicate normalized agent key",
+    );
+  });
+
+  it("prevents agent from broadening prefetch on a tools-only profile", () => {
+    const cfg = {
+      agents: { defaults: { workspace: "/tmp/memory-test" } },
+      memory: {
+        backend: "builtin",
+        agents: {
+          main: { backend: "skw", skw: { profile: "main-profile", prefetch: true } },
+        },
+        skw: {
+          profileDefinitions: {
+            "main-profile": {
+              databasePath: "/nix/db.sqlite",
+              memoryDatabasePath: "/nix/memory.sqlite",
+              sessionMapPath: "/nix/session.json",
+              cachePath: "/nix/cache",
+              allowedCollections: [],
+              allowedSourceRoots: [],
+              limits: {
+                recallMode: "tools-only",
+                topK: 10,
+                writable: false,
+                autoExtract: false,
+                extractor: "pattern",
+                maxWriteCharacters: 1000,
+                maxInjectedCharacters: 2000,
+                maxInjectedTokens: 500,
+                minTurnsBetweenAttempts: 1,
+                candidatePoolSize: 20,
+                rerankThreshold: 0.5,
+                maxChunksPerSource: 3,
+                defaultTrust: 0.8,
+                minTrust: 0.2,
+                temporalDecayHalfLife: 24,
+                rerankerModel: "default",
+                rerankerCacheDir: "/tmp",
+              },
+            },
+          },
+        },
+      },
+    } as OpenClawConfig;
+    const resolved = resolveMemoryBackendConfig({ cfg, agentId: "main" });
+    expect(resolved.skw?.effective?.prefetch).toBe(false);
+  });
+
+  it("allows prefetch when profile recall mode is prefetch", () => {
+    const cfg = {
+      agents: { defaults: { workspace: "/tmp/memory-test" } },
+      memory: {
+        backend: "builtin",
+        agents: {
+          main: { backend: "skw", skw: { profile: "main-profile" } },
+        },
+        skw: {
+          profileDefinitions: {
+            "main-profile": {
+              databasePath: "/nix/db.sqlite",
+              memoryDatabasePath: "/nix/memory.sqlite",
+              sessionMapPath: "/nix/session.json",
+              cachePath: "/nix/cache",
+              allowedCollections: [],
+              allowedSourceRoots: [],
+              limits: {
+                recallMode: "prefetch",
+                topK: 10,
+                writable: true,
+                autoExtract: true,
+                extractor: "llm",
+                maxWriteCharacters: 1000,
+                maxInjectedCharacters: 2000,
+                maxInjectedTokens: 500,
+                minTurnsBetweenAttempts: 1,
+                candidatePoolSize: 20,
+                rerankThreshold: 0.5,
+                maxChunksPerSource: 3,
+                defaultTrust: 0.8,
+                minTrust: 0.2,
+                temporalDecayHalfLife: 24,
+                rerankerModel: "default",
+                rerankerCacheDir: "/tmp",
+              },
+            },
+          },
+        },
+      },
+    } as OpenClawConfig;
+    const resolved = resolveMemoryBackendConfig({ cfg, agentId: "main" });
+    expect(resolved.skw?.effective?.prefetch).toBe(true);
+  });
+
+  it("throws when explicit per-agent skw backend has no profile mapping", () => {
+    const cfg = {
+      agents: { defaults: { workspace: "/tmp/memory-test" } },
+      memory: {
+        backend: "builtin",
+        agents: {
+          main: { backend: "skw" },
+        },
+      },
+    } as OpenClawConfig;
+    expect(() => resolveMemoryBackendConfig({ cfg, agentId: "main" })).toThrow(
+      'memory agent main has backend "skw" but no profile mapping',
+    );
+  });
+
+  it("allows explicit per-agent skw backend via legacy profile mapping", () => {
+    const cfg = {
+      agents: { defaults: { workspace: "/tmp/memory-test" } },
+      memory: {
+        backend: "builtin",
+        agents: {
+          main: { backend: "skw" },
+        },
+        skw: {
+          profiles: {
+            main: "main-profile",
+          },
+          profileDefinitions: {
+            "main-profile": {
+              databasePath: "/nix/db.sqlite",
+              memoryDatabasePath: "/nix/memory.sqlite",
+              sessionMapPath: "/nix/session.json",
+              cachePath: "/nix/cache",
+              allowedCollections: [],
+              allowedSourceRoots: [],
+              limits: {
+                recallMode: "hybrid",
+                topK: 10,
+                writable: true,
+                autoExtract: true,
+                extractor: "llm",
+                maxWriteCharacters: 1000,
+                maxInjectedCharacters: 2000,
+                maxInjectedTokens: 500,
+                minTurnsBetweenAttempts: 1,
+                candidatePoolSize: 20,
+                rerankThreshold: 0.5,
+                maxChunksPerSource: 3,
+                defaultTrust: 0.8,
+                minTrust: 0.2,
+                temporalDecayHalfLife: 24,
+                rerankerModel: "default",
+                rerankerCacheDir: "/tmp",
+              },
+            },
+          },
+        },
+      },
+    } as OpenClawConfig;
+    const resolved = resolveMemoryBackendConfig({ cfg, agentId: "main" });
+    expect(resolved.backend).toBe("skw");
+    expect(resolved.skw?.profile).toBe("main-profile");
+  });
+
+  it("preserves builtin backend resolution with an explicit baseline", () => {
+    const cfg = {
+      agents: { defaults: { workspace: "/tmp/memory-test" } },
+      memory: { backend: "builtin" },
+    } as OpenClawConfig;
+    const resolved = resolveMemoryBackendConfig({ cfg, agentId: "main" });
+    expect(resolved).toStrictEqual({
+      backend: "builtin",
+      citations: "auto",
+    });
+  });
+
+  it("preserves qmd backend resolution with an explicit baseline snapshot", () => {
+    const cfg = {
+      agents: { defaults: { workspace: "/tmp/qmd-test" } },
+      memory: {
+        backend: "qmd",
+        qmd: {
+          command: "qmd",
+          searchMode: "query",
+          searchTool: "hybrid_search",
+        },
+      },
+    } as OpenClawConfig;
+    const resolved = resolveMemoryBackendConfig({ cfg, agentId: "main" });
+    expect(resolved.backend).toBe("qmd");
+    expect(resolved.citations).toBe("auto");
+    expect(resolved.skw).toBeUndefined();
+    expect(resolved.qmd?.command).toBe("qmd");
+    expect(resolved.qmd?.searchMode).toBe("query");
+    expect(resolved.qmd?.searchTool).toBe("hybrid_search");
   });
 });
 

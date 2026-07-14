@@ -69,6 +69,15 @@ function createMemoryRuntimeFixture() {
   return {
     getMemorySearchManager: vi.fn(async () => ({ manager: null, error: "no index" })),
     resolveMemoryBackendConfig: vi.fn(() => ({ backend: "builtin" as const })),
+    getMemoryRuntimeStatus: vi.fn(() => ({ backend: "builtin" as const, ready: true })),
+    probeMemoryRuntime: vi.fn(async () => ({ ok: true, latencyMs: 0 })),
+    getMemoryRuntimeCapabilities: vi.fn(() => ({
+      backend: "builtin" as const,
+      features: new Set(["search", "get"] as const),
+      writable: false,
+      autoExtract: false,
+      prefetch: false,
+    })),
     closeMemorySearchManager: vi.fn(async () => {}),
   };
 }
@@ -338,6 +347,15 @@ describe("memory runtime auto-enable loading", () => {
         const runtime = {
           getMemorySearchManager: vi.fn(async () => ({ manager: null, error: "no index" })),
           resolveMemoryBackendConfig: vi.fn(() => ({ backend: "builtin" as const })),
+          getMemoryRuntimeStatus: vi.fn(() => ({ backend: "builtin" as const, ready: true })),
+          probeMemoryRuntime: vi.fn(async () => ({ ok: true, latencyMs: 0 })),
+          getMemoryRuntimeCapabilities: vi.fn(() => ({
+            backend: "builtin" as const,
+            features: new Set(["search", "get"] as const),
+            writable: false,
+            autoExtract: false,
+            prefetch: false,
+          })),
           closeAllMemorySearchManagers: vi.fn(async () => {}),
         };
         getMemoryRuntimeMock.mockReturnValue(runtime);
