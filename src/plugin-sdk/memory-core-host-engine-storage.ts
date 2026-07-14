@@ -116,6 +116,8 @@ export type MemoryEmbeddingProbeResult = {
 export type {
   MemoryChunk,
   MemoryFileEntry,
+  MemoryPrefetchQuality,
+  MemoryPrefetchResult,
   MemoryProviderStatus,
   MemoryReadResult,
   MemorySearchManager,

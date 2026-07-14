@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/memory-core-host-engine-foundation";
 import type {
   MemoryEmbeddingProbeResult,
+  MemoryPrefetchResult,
   MemoryProviderStatus,
   MemoryReadResult,
   MemorySearchManager,
@@ -10,6 +11,7 @@ import type {
   MemorySource,
   ResolvedSkwConfig,
 } from "openclaw/plugin-sdk/memory-core-host-engine-storage";
+import { parseSkwPrefetchResult } from "./skw-prefetch.js";
 import { PROTOCOL_VERSION, SkwProviderError } from "./skw-provider-framing.js";
 import { skwProviderPool } from "./skw-provider-pool.js";
 import { SkwProviderProcess, type SkwProviderProcessConfig } from "./skw-provider-process.js";
@@ -106,7 +108,7 @@ function stableValue(value: unknown): unknown {
     return value;
   }
   const sorted: Record<string, unknown> = {};
-  for (const [key, item] of Object.entries(value).sort(([a], [b]) => a.localeCompare(b))) {
+  for (const [key, item] of Object.entries(value).toSorted(([a], [b]) => a.localeCompare(b))) {
     sorted[key] = stableValue(item);
   }
   return sorted;
@@ -330,6 +332,42 @@ export class SkwMemorySearchManager implements MemorySearchManager {
     return results;
   }
 
+  async prefetch(params: {
+    query: string;
+    sessionKey?: string;
+    sessionId?: string;
+  }): Promise<MemoryPrefetchResult> {
+    const process = await this.ensureProcess();
+    const sessionScope = this.params.sessionMappingProvider?.resolveSessionScope({
+      agentId: this.params.agentId,
+      sessionKey: params.sessionKey,
+      sources: ["sessions"],
+    });
+    if (!params.sessionKey || !params.sessionId || !sessionScope) {
+      return {};
+    }
+    const mapping = sessionScope.mappings.find(
+      (candidate) => candidate.sessionKey === params.sessionKey,
+    );
+    if (!mapping || mapping.sessionId !== params.sessionId || mapping.archived) {
+      return {};
+    }
+    const result = await this.requestWithProcess(
+      process,
+      "prefetch",
+      { query: params.query },
+      undefined,
+      {
+        agentId: this.params.agentId,
+        profile: this.keyParts.profile,
+        sessionId: params.sessionId,
+        sessionKey: params.sessionKey,
+      },
+    );
+    await this.refreshStatusAfterOperation();
+    return parseSkwPrefetchResult(result);
+  }
+
   async readFile(params: {
     relPath: string;
     from?: number;
@@ -534,11 +572,12 @@ export class SkwMemorySearchManager implements MemorySearchManager {
     op: string,
     params: Record<string, unknown>,
     signal?: AbortSignal,
+    identityOverride?: import("./skw-provider-framing.js").SkwProviderIdentity,
   ): Promise<unknown> {
     try {
       return await process.request({
         op,
-        identity: this.identity(),
+        identity: identityOverride ?? this.identity(),
         params,
         timeoutMs: this.timeoutMs,
         signal,
@@ -585,5 +624,3 @@ export class SkwMemorySearchManager implements MemorySearchManager {
     skwProviderPool.setStatus(this.key, this.statusCache);
   }
 }
-
-export {};

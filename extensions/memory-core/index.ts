@@ -19,6 +19,7 @@ import { registerShortTermPromotionDreaming } from "./src/dreaming.js";
 import { buildMemoryFlushPlan } from "./src/flush-plan.js";
 import { buildPromptSection } from "./src/prompt-section.js";
 import { getMemoryRuntimeCapabilities, getMemoryRuntimeStatus } from "./src/runtime-provider.js";
+import { registerSkwPrefetchHook } from "./src/skw-prefetch-hook.js";
 
 type MemoryToolsModule = typeof import("./src/tools.js");
 type RuntimeProviderModule = typeof import("./src/runtime-provider.js");
@@ -207,6 +208,8 @@ export default definePluginEntry({
         },
       },
     });
+
+    registerSkwPrefetchHook({ api, runtime: memoryRuntime });
 
     api.registerTool((ctx) => createLazyMemorySearchTool(resolveMemoryToolOptions(ctx)), {
       names: ["memory_search"],

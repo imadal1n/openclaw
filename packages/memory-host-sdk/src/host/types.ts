@@ -162,6 +162,15 @@ export type MemoryProviderStatus = {
   custom?: Record<string, unknown>;
 };
 
+export type MemoryPrefetchQuality = "fast" | "cached-full" | "abstain";
+
+/** Result of a prefetch recall call, returning static guidance and dynamic recall context. */
+export type MemoryPrefetchResult = {
+  context?: string;
+  quality?: MemoryPrefetchQuality;
+  systemPromptBlock?: string;
+};
+
 /** Search/read/sync/status contract implemented by memory managers. */
 export interface MemorySearchManager {
   search(
@@ -190,4 +199,13 @@ export interface MemorySearchManager {
   probeVectorStoreAvailability?(): Promise<boolean>;
   probeVectorAvailability(): Promise<boolean>;
   close?(): Promise<void>;
+  /**
+   * Optional automatic recall prefetch before prompt build.
+   * Implemented by SKW managers to inject static guidance and recall context.
+   */
+  prefetch?(params: {
+    query: string;
+    sessionKey?: string;
+    sessionId?: string;
+  }): Promise<MemoryPrefetchResult>;
 }
