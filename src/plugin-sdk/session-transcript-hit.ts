@@ -6,12 +6,15 @@ import { parseUsageCountedSessionIdFromFileName } from "../config/sessions/artif
 import type { SessionEntry } from "../config/sessions/types.js";
 import { normalizeAgentId } from "../routing/session-key.js";
 export {
+  buildSessionTranscriptMapEntry,
   formatSessionTranscriptMemoryHitKey,
   parseSessionTranscriptMemoryHitKey,
   resolveSessionTranscriptMemoryHitKeyToSessionKeys,
 } from "./session-transcript-memory-hit.js";
 export type {
   ResolveSessionTranscriptMemoryHitKeyParams,
+  SessionTranscriptMapEntry,
+  SessionTranscriptMapEntryParams,
   SessionTranscriptIdentity,
   SessionTranscriptMemoryHitIdentity,
   SessionTranscriptMemoryHitKey,

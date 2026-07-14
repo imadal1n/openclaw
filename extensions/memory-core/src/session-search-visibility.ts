@@ -13,7 +13,10 @@ import {
   createSessionVisibilityGuard,
   resolveEffectiveSessionToolsVisibility,
 } from "openclaw/plugin-sdk/session-visibility";
-import { readQmdSessionArtifactIdentity } from "./qmd-session-artifacts.js";
+import {
+  readSessionArtifactIdentity,
+  type SessionArtifactIdentity,
+} from "./qmd-session-artifacts.js";
 
 function normalizeAgentIdForCompare(value: string | undefined): string | undefined {
   return value?.trim().toLowerCase() || undefined;
@@ -86,7 +89,7 @@ export async function filterMemorySearchHitsBySessionVisibility(params: {
     if (!params.requesterSessionKey || !guard) {
       continue;
     }
-    const artifactIdentity = readQmdSessionArtifactIdentity(hit);
+    const artifactIdentity: SessionArtifactIdentity | null = readSessionArtifactIdentity(hit);
     if (artifactIdentity) {
       const normalizedScopedAgentId = normalizeAgentIdForCompare(scopedAgentId);
       const normalizedOwnerAgentId = normalizeAgentIdForCompare(artifactIdentity.agentId);

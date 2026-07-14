@@ -14,7 +14,7 @@
         "ok": true,
         "results": [
           {
-            "path": "skw://memory/source-file-line?chunk=source-line&sig=valid-source-line",
+            "path": "skw://v1/source-file-line",
             "startLine": 12,
             "endLine": 14,
             "score": 0.97,
@@ -49,7 +49,7 @@
         "ok": true,
         "results": [
           {
-            "path": "skw://memory/shared?chunk=shared&sig=valid-shared",
+            "path": "skw://v1/shared",
             "startLine": 1,
             "endLine": 2,
             "score": 0.9,
@@ -73,7 +73,7 @@
         "ok": true,
         "results": [
           {
-            "path": "skw://memory/private?chunk=private&sig=valid-private",
+            "path": "skw://v1/private",
             "startLine": 7,
             "endLine": 7,
             "score": 0.88,
@@ -97,7 +97,7 @@
         "ok": true,
         "results": [
           {
-            "path": "skw://sessions/current?chunk=session&sig=valid-session",
+            "path": "skw://v1/session-current",
             "startLine": 20,
             "endLine": 24,
             "score": 0.86,
@@ -127,7 +127,7 @@
         "ok": true,
         "results": [
           {
-            "path": "skw://sessions/archive?chunk=session&sig=valid-archive",
+            "path": "skw://v1/session-archive",
             "startLine": 30,
             "endLine": 35,
             "score": 0.81,
@@ -153,7 +153,7 @@
         "profile": "host",
         "request": {
           "case": "read-signed-skw-path",
-          "path": "skw://memory/source-file-line?chunk=source-line&sig=valid-source-line",
+          "path": "skw://v1/source-file-line",
           "from": 12,
           "lines": 3
         }
@@ -161,7 +161,7 @@
       "response": {
         "ok": true,
         "result": {
-          "path": "skw://memory/source-file-line?chunk=source-line&sig=valid-source-line",
+          "path": "skw://v1/source-file-line",
           "text": "fixture source line result\nsecond line\nthird line",
           "from": 12,
           "lines": 3,
@@ -260,7 +260,7 @@
         "ok": true,
         "results": [
           {
-            "path": "skw://memory/bad-tier?chunk=bad&sig=valid-bad-tier",
+            "path": "skw://v1/bad-tier",
             "startLine": 1,
             "endLine": 1,
             "score": 0.5,
@@ -299,7 +299,7 @@
         "ok": true,
         "results": [
           {
-            "path": "skw://memory/hidden?chunk=hidden&sig=valid-hidden",
+            "path": "skw://v1/hidden",
             "startLine": 4,
             "endLine": 4,
             "score": 0.3,
@@ -318,7 +318,7 @@
         "ok": true,
         "results": [
           {
-            "path": "skw://sessions/malformed?chunk=session&sig=valid-malformed",
+            "path": "skw://v1/session-malformed",
             "startLine": 2,
             "endLine": 3,
             "score": 0.6,
@@ -338,7 +338,7 @@
         "ok": true,
         "results": [
           {
-            "path": "skw://sessions/cross-agent?chunk=session&sig=valid-cross-agent",
+            "path": "skw://v1/session-cross-agent",
             "startLine": 2,
             "endLine": 3,
             "score": 0.6,
@@ -363,7 +363,7 @@
         "ok": true,
         "results": [
           {
-            "path": "skw://memory/missing?chunk=missing&sig=valid-missing",
+            "path": "skw://v1/missing",
             "startLine": 1,
             "score": 0.4,
             "source": "memory",

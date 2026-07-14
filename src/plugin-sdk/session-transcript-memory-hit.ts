@@ -20,6 +20,23 @@ export type SessionTranscriptMemoryHitIdentity = {
 
 export type SessionTranscriptMemoryHitKey = `transcript:${string}:${string}`;
 
+export type SessionTranscriptMapEntry = {
+  readonly agentId: string;
+  readonly archived: boolean;
+  readonly memoryKey: SessionTranscriptMemoryHitKey;
+  readonly sessionId: string;
+  readonly sessionKey: string;
+  readonly sourceId: string;
+};
+
+export type SessionTranscriptMapEntryParams = {
+  readonly agentId: string;
+  readonly archived?: boolean;
+  readonly sessionId: string;
+  readonly sessionKey: string;
+  readonly sourceId?: string;
+};
+
 export type SessionTranscriptReadParams = {
   agentId?: string;
   env?: NodeJS.ProcessEnv;
@@ -41,11 +58,16 @@ export type ResolveSessionTranscriptMemoryHitKeyParams = {
   store: Record<string, SessionEntry>;
 };
 
-function requireMemoryKeySegment(value: string, label: string): string {
+function requireSessionTranscriptValue(value: string, label: string): string {
   const normalized = normalizeOptionalString(value);
   if (!normalized) {
     throw new Error(`Cannot build session transcript memory hit key without ${label}.`);
   }
+  return normalized;
+}
+
+function requireMemoryKeySegment(value: string, label: string): string {
+  const normalized = requireSessionTranscriptValue(value, label);
   return encodeURIComponent(normalized);
 }
 
@@ -70,6 +92,23 @@ export function formatSessionTranscriptMemoryHitKey(
   const agentId = requireMemoryKeySegment(normalizeAgentId(params.agentId), "agentId");
   const sessionId = requireMemoryKeySegment(params.sessionId, "sessionId");
   return `${SESSION_TRANSCRIPT_MEMORY_HIT_PREFIX}:${agentId}:${sessionId}`;
+}
+
+export function buildSessionTranscriptMapEntry(
+  params: SessionTranscriptMapEntryParams,
+): SessionTranscriptMapEntry {
+  const agentId = normalizeAgentId(requireSessionTranscriptValue(params.agentId, "agentId"));
+  const sessionId = requireSessionTranscriptValue(params.sessionId, "sessionId");
+  const sessionKey = requireSessionTranscriptValue(params.sessionKey, "sessionKey");
+  const sourceId = requireSessionTranscriptValue(params.sourceId ?? sessionKey, "sourceId");
+  return {
+    agentId,
+    archived: params.archived === true,
+    memoryKey: formatSessionTranscriptMemoryHitKey({ agentId, sessionId }),
+    sessionId,
+    sessionKey,
+    sourceId,
+  };
 }
 
 /**

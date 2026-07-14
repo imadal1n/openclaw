@@ -6,7 +6,22 @@ import type { MemorySearchResult } from "openclaw/plugin-sdk/memory-core-host-ru
 
 const QMD_SESSION_ARTIFACT_TABLE = "openclaw_qmd_session_artifacts";
 
-export const QMD_SESSION_ARTIFACT_HIT: unique symbol = Symbol("openclaw.qmdSessionArtifactHit");
+export const SESSION_ARTIFACT_HIT: unique symbol = Symbol("openclaw.sessionArtifactHit");
+
+export const QMD_SESSION_ARTIFACT_HIT = SESSION_ARTIFACT_HIT;
+
+export type SessionArtifactIdentity = {
+  agentId: string;
+  archived: boolean;
+  memoryKey: string;
+  sessionId: string;
+};
+
+export type QmdSessionArtifactIdentity = SessionArtifactIdentity;
+
+type SessionArtifactHitCarrier = MemorySearchResult & {
+  [SESSION_ARTIFACT_HIT]?: SessionArtifactIdentity;
+};
 
 export type QmdSessionArtifactMapping = {
   agentId: string;
@@ -24,17 +39,6 @@ export type QmdSessionArtifactLookup = {
   docid?: string;
   indexPath: string;
   searchPath: string;
-};
-
-export type QmdSessionArtifactIdentity = {
-  agentId: string;
-  archived: boolean;
-  memoryKey: string;
-  sessionId: string;
-};
-
-type QmdSessionArtifactHitCarrier = MemorySearchResult & {
-  [QMD_SESSION_ARTIFACT_HIT]?: QmdSessionArtifactIdentity;
 };
 
 type QmdSessionArtifactRow = {
@@ -89,11 +93,11 @@ function openQmdSessionArtifactDb(indexPath: string, readOnly = false): Database
   return db;
 }
 
-export function attachQmdSessionArtifactHit(
+export function attachSessionArtifactHit(
   hit: MemorySearchResult,
-  identity: QmdSessionArtifactIdentity,
+  identity: SessionArtifactIdentity,
 ): MemorySearchResult {
-  Object.defineProperty(hit, QMD_SESSION_ARTIFACT_HIT, {
+  Object.defineProperty(hit, SESSION_ARTIFACT_HIT, {
     configurable: true,
     enumerable: false,
     value: identity,
@@ -101,18 +105,71 @@ export function attachQmdSessionArtifactHit(
   return hit;
 }
 
-export function copyQmdSessionArtifactHit(
+export const attachQmdSessionArtifactHit = attachSessionArtifactHit;
+
+export function copySessionArtifactHit(
   source: MemorySearchResult,
   target: MemorySearchResult,
 ): MemorySearchResult {
-  const identity = readQmdSessionArtifactIdentity(source);
-  return identity ? attachQmdSessionArtifactHit(target, identity) : target;
+  const identity = readSessionArtifactIdentity(source);
+  return identity ? attachSessionArtifactHit(target, identity) : target;
 }
 
-export function readQmdSessionArtifactIdentity(
+export const copyQmdSessionArtifactHit = copySessionArtifactHit;
+
+export function readSessionArtifactIdentity(
   hit: MemorySearchResult,
-): QmdSessionArtifactIdentity | null {
-  return (hit as QmdSessionArtifactHitCarrier)[QMD_SESSION_ARTIFACT_HIT] ?? null;
+): SessionArtifactIdentity | null {
+  return (hit as SessionArtifactHitCarrier)[SESSION_ARTIFACT_HIT] ?? null;
+}
+
+export const readQmdSessionArtifactIdentity = readSessionArtifactIdentity;
+
+export type QmdSessionArtifactMappingReader = {
+  readMappings(params: { agentId: string; searchPaths?: string[] }): QmdSessionArtifactMapping[];
+};
+
+export function createQmdSessionArtifactMappingReader(params: {
+  indexPath: string;
+}): QmdSessionArtifactMappingReader {
+  return {
+    readMappings(query) {
+      let db: DatabaseSync;
+      try {
+        db = openQmdSessionArtifactDb(params.indexPath, true);
+      } catch {
+        return [];
+      }
+      try {
+        const agentId = query.agentId.trim();
+        const searchPaths = query.searchPaths?.map((p) => p.trim()).filter(Boolean) ?? [];
+        let sql = `SELECT collection, artifact_path, search_path, docid, archived, memory_key AS memoryKey,
+                          agent_id AS agentId, session_id AS sessionId
+                   FROM ${QMD_SESSION_ARTIFACT_TABLE}
+                   WHERE agent_id = ? AND archived = 0`;
+        const args: (string | number)[] = [agentId];
+        if (searchPaths.length > 0) {
+          const placeholders = searchPaths.map(() => "?").join(", ");
+          sql += ` AND search_path IN (${placeholders})`;
+          args.push(...searchPaths);
+        }
+        const rows = db.prepare(sql).all(...args) as QmdSessionArtifactRow[];
+        return rows.map((row) => ({
+          agentId: row.agentId,
+          archived: row.archived === 1,
+          artifactPath: row.artifact_path,
+          collection: row.collection,
+          memoryKey: row.memoryKey,
+          searchPath: row.search_path,
+          sessionId: row.sessionId,
+        }));
+      } catch {
+        return [];
+      } finally {
+        db.close();
+      }
+    },
+  };
 }
 
 export function replaceQmdSessionArtifactMappings(params: {

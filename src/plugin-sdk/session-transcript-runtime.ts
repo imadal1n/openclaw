@@ -20,10 +20,13 @@ import {
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { normalizeAgentId } from "../routing/session-key.js";
 import {
+  buildSessionTranscriptMapEntry,
   formatSessionTranscriptMemoryHitKey,
   parseSessionTranscriptMemoryHitKey,
   resolveSessionTranscriptMemoryHitKeyToSessionKeys,
   type ResolveSessionTranscriptMemoryHitKeyParams,
+  type SessionTranscriptMapEntry,
+  type SessionTranscriptMapEntryParams,
   type SessionTranscriptIdentity,
   type SessionTranscriptMemoryHitIdentity,
   type SessionTranscriptMemoryHitKey,
@@ -32,12 +35,15 @@ import {
 } from "./session-transcript-memory-hit.js";
 
 export {
+  buildSessionTranscriptMapEntry,
   formatSessionTranscriptMemoryHitKey,
   parseSessionTranscriptMemoryHitKey,
   resolveSessionTranscriptMemoryHitKeyToSessionKeys,
 };
 export type {
   ResolveSessionTranscriptMemoryHitKeyParams,
+  SessionTranscriptMapEntry,
+  SessionTranscriptMapEntryParams,
   SessionTranscriptIdentity,
   SessionTranscriptMemoryHitIdentity,
   SessionTranscriptMemoryHitKey,

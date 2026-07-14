@@ -1,7 +1,5 @@
 // Memory Core plugin module implements search manager behavior.
 import fs from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import {
   createSubsystemLogger,
@@ -9,7 +7,6 @@ import {
   resolveAgentWorkspaceDir,
   resolveGlobalSingleton,
   resolveMemorySearchSyncConfig,
-  resolveStateDir,
   type OpenClawConfig,
 } from "openclaw/plugin-sdk/memory-core-host-engine-foundation";
 import {
@@ -27,9 +24,9 @@ import {
   type ResolvedSkwConfig,
 } from "openclaw/plugin-sdk/memory-core-host-engine-storage";
 import { normalizeAgentId } from "openclaw/plugin-sdk/routing";
-import { createQmdSessionArtifactMappingReader } from "../qmd-session-artifacts.js";
-import { SkwMemorySearchManager, type SkwSessionMappingProvider } from "./skw-manager.js";
+import { SkwMemorySearchManager } from "./skw-manager.js";
 import { skwProviderPool } from "./skw-provider-pool.js";
+import { createSkwSessionMappingProvider } from "./skw-session-map.js";
 
 const MEMORY_SEARCH_MANAGER_CACHE_KEY = Symbol.for("openclaw.memorySearchManagerCache");
 type Maybe<T> = T | null;
@@ -743,47 +740,6 @@ function buildQmdManagerIdentityKey(
 
 function buildSkwManagerIdentityKey(agentId: string, config: ResolvedSkwConfig): string {
   return `${agentId}:${JSON.stringify(config)}`;
-}
-
-function resolveQmdIndexPath(agentId: string): string {
-  const stateDir = resolveStateDir(process.env, os.homedir);
-  return path.join(stateDir, "agents", agentId, "qmd", "xdg-cache", "qmd", "index.sqlite");
-}
-
-export function createSkwSessionMappingProvider(params: {
-  cfg: OpenClawConfig;
-  agentId: string;
-}): SkwSessionMappingProvider {
-  const agentId = normalizeAgentId(params.agentId);
-  const indexPath = resolveQmdIndexPath(agentId);
-  const reader = createQmdSessionArtifactMappingReader({ indexPath });
-
-  return {
-    resolveSessionScope(scopeParams) {
-      if (normalizeAgentId(scopeParams.agentId) !== agentId) {
-        return null;
-      }
-      const sources = scopeParams.sources ?? ["sessions"];
-      if (!sources.includes("sessions")) {
-        return null;
-      }
-      const mappings = reader.readMappings({ agentId });
-      if (mappings.length === 0) {
-        return null;
-      }
-      return {
-        sessionKey: scopeParams.sessionKey ?? "",
-        sources,
-        mappings: mappings.map((mapping) => ({
-          sourceId: mapping.searchPath,
-          agentId: mapping.agentId,
-          sessionId: mapping.sessionId,
-          memoryKey: mapping.memoryKey,
-          archived: mapping.archived,
-        })),
-      };
-    },
-  };
 }
 
 function resolveQmdManagerRuntimeConfig(

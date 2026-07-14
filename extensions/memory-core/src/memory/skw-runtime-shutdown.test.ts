@@ -117,7 +117,9 @@ describe("runtime SKW shutdown", () => {
       pid = await readPid(paths.pid);
       const active = manager.search("active", { maxResults: 1 }).catch((err: unknown) => err);
       await vi.waitFor(async () => expect(await readFile(paths.op, "utf8")).toContain("search"));
-      const queued = manager.readFile({ relPath: "skw://queued" }).catch((err: unknown) => err);
+      const queued = manager
+        .readFile({ relPath: "provider://queued" })
+        .catch((err: unknown) => err);
 
       await closeAllMemorySearchManagers();
       const settled = await settleWithin(Promise.all([active, queued]), 500);

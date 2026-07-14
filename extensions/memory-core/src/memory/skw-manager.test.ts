@@ -62,7 +62,7 @@ describe("SkwMemorySearchManager persistent process", () => {
     await respondToOperation(stdout, stdin, "search", {
       results: [
         {
-          path: "skw://a",
+          path: "skw://v1/a",
           startLine: 1,
           endLine: 2,
           snippet: "hello",
@@ -349,10 +349,10 @@ describe("SkwMemorySearchManager persistent process", () => {
     expect(newChild).not.toBe(child);
   });
 
-  it("propagates handle tamper/expiry provider errors", async () => {
+  it("propagates provider errors for non-SKW adapter read paths", async () => {
     const { manager, stdout, stdin } = await createManager();
 
-    const promise = manager.readFile({ relPath: "skw://tampered" });
+    const promise = manager.readFile({ relPath: "provider://tampered" });
     const frame = await waitForOperationFrame(stdin, "read");
     emitFrame(stdout, {
       version: 1,

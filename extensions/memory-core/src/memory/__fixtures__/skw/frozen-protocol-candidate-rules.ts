@@ -177,8 +177,8 @@ function validateProbeResponse(response: Record<string, unknown>, errors: string
 }
 
 function validateSignedReadPath(value: unknown, errors: string[]): void {
-  if (typeof value !== "string" || !value.startsWith("skw://") || !value.includes("sig=")) {
-    errors.push("read path is not a signed skw path");
+  if (typeof value !== "string" || !/^skw:\/\/v1\/[^/?#\s]+$/u.test(value)) {
+    errors.push("read path is not a v1 opaque skw handle");
   }
   if (
     typeof value === "string" &&

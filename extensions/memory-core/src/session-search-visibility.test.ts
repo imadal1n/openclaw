@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   attachQmdSessionArtifactHit,
   copyQmdSessionArtifactHit,
+  createQmdSessionArtifactMappingReader,
   replaceQmdSessionArtifactMappings,
   resolveQmdSessionArtifactIdentity,
 } from "./qmd-session-artifacts.js";
@@ -42,50 +43,50 @@ vi.mock("openclaw/plugin-sdk/session-transcript-hit", async (importOriginal) => 
   };
 });
 
-describe("filterMemorySearchHitsBySessionVisibility", () => {
-  afterEach(async () => {
-    vi.mocked(sessionTranscriptHit.loadCombinedSessionStoreForGateway).mockClear();
-    combinedSessionStore = crossAgentStore;
-    while (tempRoots.length > 0) {
-      const root = tempRoots.pop();
-      if (root) {
-        await fs.rm(root, { recursive: true, force: true });
-      }
+afterEach(async () => {
+  vi.mocked(sessionTranscriptHit.loadCombinedSessionStoreForGateway).mockClear();
+  combinedSessionStore = crossAgentStore;
+  while (tempRoots.length > 0) {
+    const root = tempRoots.pop();
+    if (root) {
+      await fs.rm(root, { recursive: true, force: true });
     }
-  });
-
-  async function createQmdArtifactIndex(params: {
-    agentId: string;
-    archived?: boolean;
-    artifactPath: string;
-    collection: string;
-    searchPath: string;
-    sessionId: string;
-  }): Promise<string> {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-qmd-session-artifact-"));
-    tempRoots.push(root);
-    const indexPath = path.join(root, "index.sqlite");
-    replaceQmdSessionArtifactMappings({
-      collection: params.collection,
-      indexPath,
-      mappings: [
-        {
-          agentId: params.agentId,
-          archived: params.archived === true,
-          artifactPath: params.artifactPath,
-          collection: params.collection,
-          memoryKey: sessionTranscriptHit.formatSessionTranscriptMemoryHitKey({
-            agentId: params.agentId,
-            sessionId: params.sessionId,
-          }),
-          searchPath: params.searchPath,
-          sessionId: params.sessionId,
-        },
-      ],
-    });
-    return indexPath;
   }
+});
 
+async function createQmdArtifactIndex(params: {
+  agentId: string;
+  archived?: boolean;
+  artifactPath: string;
+  collection: string;
+  searchPath: string;
+  sessionId: string;
+}): Promise<string> {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-qmd-session-artifact-"));
+  tempRoots.push(root);
+  const indexPath = path.join(root, "index.sqlite");
+  replaceQmdSessionArtifactMappings({
+    collection: params.collection,
+    indexPath,
+    mappings: [
+      {
+        agentId: params.agentId,
+        archived: params.archived === true,
+        artifactPath: params.artifactPath,
+        collection: params.collection,
+        memoryKey: sessionTranscriptHit.formatSessionTranscriptMemoryHitKey({
+          agentId: params.agentId,
+          sessionId: params.sessionId,
+        }),
+        searchPath: params.searchPath,
+        sessionId: params.sessionId,
+      },
+    ],
+  });
+  return indexPath;
+}
+
+describe("filterMemorySearchHitsBySessionVisibility", () => {
   function attachMappedQmdHit(
     hit: MemorySearchResult,
     lookup: Parameters<typeof resolveQmdSessionArtifactIdentity>[0],
@@ -700,6 +701,98 @@ describe("filterMemorySearchHitsBySessionVisibility", () => {
     expect(filtered).toStrictEqual([]);
   });
 
+  it("keeps signed SKW session corpus hits when requester visibility allows the mapped session", async () => {
+    // Given: a signed SKW session hit carries generic OpenClaw session artifact identity.
+    combinedSessionStore = {
+      "agent:main:visible": {
+        sessionId: "visible-session",
+        updatedAt: 1,
+        sessionFile: "/tmp/sessions/visible-session.jsonl",
+      },
+    };
+    const hit = attachQmdSessionArtifactHit(
+      {
+        path: "skw://v1/session-current",
+        source: "sessions",
+        score: 1,
+        snippet: "x",
+        startLine: 20,
+        endLine: 24,
+      },
+      {
+        agentId: "main",
+        archived: false,
+        memoryKey: sessionTranscriptHit.formatSessionTranscriptMemoryHitKey({
+          agentId: "main",
+          sessionId: "visible-session",
+        }),
+        sessionId: "visible-session",
+      },
+    );
+    const cfg = asOpenClawConfig({
+      tools: {
+        sessions: { visibility: "self" },
+      },
+    });
+
+    // When: the requester is the same visible session.
+    const filtered = await filterMemorySearchHitsBySessionVisibility({
+      cfg,
+      requesterSessionKey: "agent:main:visible",
+      sandboxed: false,
+      hits: [hit],
+    });
+
+    // Then: SKW session corpus visibility follows the same session guard as QMD artifacts.
+    expect(filtered).toEqual([hit]);
+  });
+
+  it("denies signed SKW session corpus hits when requester visibility excludes the session", async () => {
+    // Given: a signed SKW session hit maps to a different same-agent session.
+    combinedSessionStore = {
+      "agent:main:visible": {
+        sessionId: "visible-session",
+        updatedAt: 1,
+        sessionFile: "/tmp/sessions/visible-session.jsonl",
+      },
+    };
+    const hit = attachQmdSessionArtifactHit(
+      {
+        path: "skw://v1/session-current",
+        source: "sessions",
+        score: 1,
+        snippet: "x",
+        startLine: 20,
+        endLine: 24,
+      },
+      {
+        agentId: "main",
+        archived: false,
+        memoryKey: sessionTranscriptHit.formatSessionTranscriptMemoryHitKey({
+          agentId: "main",
+          sessionId: "visible-session",
+        }),
+        sessionId: "visible-session",
+      },
+    );
+    const cfg = asOpenClawConfig({
+      tools: {
+        sessions: { visibility: "self" },
+      },
+    });
+
+    // When: another session from the same agent requests filtered SKW session hits.
+    const filtered = await filterMemorySearchHitsBySessionVisibility({
+      cfg,
+      requesterSessionKey: "agent:main:other",
+      sandboxed: false,
+      hits: [hit],
+    });
+
+    // Then: the hit is denied instead of leaking through its signed path alone.
+    expect(filtered).toStrictEqual([]);
+  });
+
   it("keeps same-agent QMD archived deleted .md hits when no store entry remains", async () => {
     combinedSessionStore = {};
     const hit: MemorySearchResult = {
@@ -724,5 +817,105 @@ describe("filterMemorySearchHitsBySessionVisibility", () => {
     });
 
     expect(filtered).toEqual([hit]);
+  });
+});
+
+describe("createQmdSessionArtifactMappingReader", () => {
+  it("returns only same-agent, non-archived mappings", async () => {
+    const indexPath = await createQmdArtifactIndex({
+      agentId: "main",
+      artifactPath: "allowed.md",
+      collection: "sessions-main",
+      searchPath: "qmd/sessions-main/allowed.md",
+      sessionId: "session-allowed",
+    });
+    replaceQmdSessionArtifactMappings({
+      collection: "sessions-main",
+      indexPath,
+      mappings: [
+        {
+          agentId: "main",
+          archived: false,
+          artifactPath: "allowed.md",
+          collection: "sessions-main",
+          memoryKey: "key-allowed",
+          searchPath: "qmd/sessions-main/allowed.md",
+          sessionId: "session-allowed",
+        },
+        {
+          agentId: "peer",
+          archived: false,
+          artifactPath: "cross.md",
+          collection: "sessions-main",
+          memoryKey: "key-cross",
+          searchPath: "qmd/sessions-main/cross.md",
+          sessionId: "session-cross",
+        },
+        {
+          agentId: "main",
+          archived: true,
+          artifactPath: "archived.md",
+          collection: "sessions-main",
+          memoryKey: "key-archived",
+          searchPath: "qmd/sessions-main/archived.md",
+          sessionId: "session-archived",
+        },
+      ],
+    });
+
+    const reader = createQmdSessionArtifactMappingReader({ indexPath });
+    const mappings = reader.readMappings({ agentId: "main" });
+
+    expect(mappings).toHaveLength(1);
+    expect(mappings[0]).toMatchObject({
+      agentId: "main",
+      archived: false,
+      memoryKey: "key-allowed",
+      searchPath: "qmd/sessions-main/allowed.md",
+      sessionId: "session-allowed",
+    });
+  });
+
+  it("filters mappings by exact search_path", async () => {
+    const indexPath = await createQmdArtifactIndex({
+      agentId: "main",
+      artifactPath: "a.md",
+      collection: "sessions-main",
+      searchPath: "qmd/sessions-main/a.md",
+      sessionId: "session-a",
+    });
+    replaceQmdSessionArtifactMappings({
+      collection: "sessions-main",
+      indexPath,
+      mappings: [
+        {
+          agentId: "main",
+          archived: false,
+          artifactPath: "a.md",
+          collection: "sessions-main",
+          memoryKey: "key-a",
+          searchPath: "qmd/sessions-main/a.md",
+          sessionId: "session-a",
+        },
+        {
+          agentId: "main",
+          archived: false,
+          artifactPath: "b.md",
+          collection: "sessions-main",
+          memoryKey: "key-b",
+          searchPath: "qmd/sessions-main/b.md",
+          sessionId: "session-b",
+        },
+      ],
+    });
+
+    const reader = createQmdSessionArtifactMappingReader({ indexPath });
+    const mappings = reader.readMappings({
+      agentId: "main",
+      searchPaths: ["qmd/sessions-main/a.md"],
+    });
+
+    expect(mappings).toHaveLength(1);
+    expect(mappings[0]?.searchPath).toBe("qmd/sessions-main/a.md");
   });
 });

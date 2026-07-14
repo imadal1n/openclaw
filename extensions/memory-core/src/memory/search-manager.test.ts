@@ -4,6 +4,11 @@ import os from "node:os";
 import path from "node:path";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/memory-core-host-engine-foundation";
 import type { checkQmdBinaryAvailability as checkQmdBinaryAvailabilityFn } from "openclaw/plugin-sdk/memory-core-host-engine-qmd";
+import type {
+  MemoryReadResult,
+  MemorySearchManager,
+  MemorySearchResult,
+} from "openclaw/plugin-sdk/memory-core-host-engine-storage";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 type CheckQmdBinaryAvailability = typeof checkQmdBinaryAvailabilityFn;
@@ -134,14 +139,66 @@ vi.mock("../../manager-runtime.js", () => ({
   closeMemoryIndexManagersForAgent: mockCloseMemoryIndexManagersForAgent,
 }));
 
+import {
+  loadSkwProtocolFixtureManifest,
+  runSkwFixtureCommand,
+  validateSkwProtocolFixtureManifest,
+} from "./__fixtures__/skw/frozen-protocol-validator.js";
 import { QmdMemoryManager } from "./qmd-manager.js";
 import {
   closeAllMemorySearchManagers,
   closeMemorySearchManager,
   getMemorySearchManager,
 } from "./search-manager.js";
-import { SKW_MEMORY_ADAPTER_UNWIRED } from "./skw-unwired-message.js";
 const createQmdManagerMock = vi.mocked(QmdMemoryManager["create"]);
+
+const skwManager = vi.hoisted(() => ({
+  search: vi.fn(
+    async (_query: string, _opts?: Record<string, unknown>) => [] as MemorySearchResult[],
+  ),
+  readFile: vi.fn(
+    async (_params: { relPath: string; from?: number; lines?: number }) =>
+      ({ text: "", path: "SKW.md" }) as MemoryReadResult,
+  ),
+  status: vi.fn(() => ({
+    backend: "skw" as const,
+    provider: "skw",
+    requestedProvider: "skw",
+    model: undefined,
+    files: undefined,
+    chunks: undefined,
+    dirty: false,
+    workspaceDir: "/tmp/workspace",
+    dbPath: undefined,
+    sources: ["memory" as const],
+    vector: {
+      enabled: true,
+      available: true,
+      semanticAvailable: true,
+    },
+    batch: {
+      enabled: false,
+      failures: 0,
+      limit: 0,
+      wait: false,
+      concurrency: 0,
+      pollIntervalMs: 0,
+      timeoutMs: 0,
+    },
+    custom: { skw: { profile: "test-profile" } },
+  })),
+  probeEmbeddingAvailability: vi.fn(async () => ({ ok: true })),
+  probeVectorAvailability: vi.fn(async () => true),
+  close: vi.fn(async () => {}),
+}));
+
+const mockSkwCreate = vi.hoisted(() => vi.fn(async () => skwManager as MemorySearchManager | null));
+
+vi.mock("./skw-manager.js", () => ({
+  SkwMemorySearchManager: {
+    create: mockSkwCreate,
+  },
+}));
 
 type QmdManagerInstance = Awaited<ReturnType<typeof QmdMemoryManager.create>>;
 type SearchManagerResult = Awaited<ReturnType<typeof getMemorySearchManager>>;
@@ -181,10 +238,26 @@ function createBuiltinCfg(agentId: string): OpenClawConfig {
   } as OpenClawConfig;
 }
 
-function createSkwCfg(agentId: string, skw?: Record<string, unknown>): OpenClawConfig {
+function createSkwCfg(
+  agentId: string,
+  skw?: Record<string, unknown>,
+  includeProfile = true,
+): OpenClawConfig {
   return {
-    memory: { backend: "skw", skw },
-    agents: { list: [{ id: agentId, default: true, workspace: "/tmp/workspace" }] },
+    memory: {
+      backend: "skw",
+      skw: {
+        ...(includeProfile ? { profiles: { [agentId]: "test-profile" } } : {}),
+        adapter: { command: "skw-fixture-adapter" },
+        ...skw,
+      },
+    },
+    agents: {
+      defaults: {
+        workspace: "/tmp/workspace",
+      },
+      list: [{ id: agentId, default: true, workspace: "/tmp/workspace" }],
+    },
   };
 }
 
@@ -302,6 +375,14 @@ beforeEach(async () => {
   checkQmdBinaryAvailability.mockClear();
   checkQmdBinaryAvailability.mockResolvedValue({ available: true });
   createQmdManagerMock.mockClear();
+  mockSkwCreate.mockClear();
+  mockSkwCreate.mockImplementation(async () => skwManager);
+  skwManager.search.mockClear();
+  skwManager.readFile.mockClear();
+  skwManager.status.mockClear();
+  skwManager.probeEmbeddingAvailability.mockClear();
+  skwManager.probeVectorAvailability.mockClear();
+  skwManager.close.mockClear();
 });
 
 describe("getMemorySearchManager caching", () => {
@@ -1113,40 +1194,170 @@ describe("getMemorySearchManager caching", () => {
   });
 });
 
-describe("skw backend fail-closed", () => {
-  it("returns manager null with stable message when memory.skw is omitted", async () => {
-    const cfg = createSkwCfg("skw-omitted");
-    const result = await getMemorySearchManager({ cfg, agentId: "skw-omitted" });
-    expect(result.manager).toBeNull();
-    expect(result.error).toBe(SKW_MEMORY_ADAPTER_UNWIRED);
-  });
-
-  it("returns manager null with stable message when memory.skw is empty", async () => {
-    const cfg = createSkwCfg("skw-empty", {});
-    const result = await getMemorySearchManager({ cfg, agentId: "skw-empty" });
-    expect(result.manager).toBeNull();
-    expect(result.error).toBe(SKW_MEMORY_ADAPTER_UNWIRED);
-  });
-
-  it("returns manager null with stable message when skw adapter is empty", async () => {
-    const cfg = createSkwCfg("skw-empty-adapter", { adapter: {} });
-    const result = await getMemorySearchManager({ cfg, agentId: "skw-empty-adapter" });
-    expect(result.manager).toBeNull();
-    expect(result.error).toBe(SKW_MEMORY_ADAPTER_UNWIRED);
-  });
-
-  it("returns manager null with stable message when skw adapter is populated", async () => {
-    const cfg = createSkwCfg("skw-populated", {
+describe("skw backend", () => {
+  it("passes the configured SKW adapter command to the manager factory", async () => {
+    // Given: the SKW backend has an explicit adapter command in config.
+    const cfg = createSkwCfg("skw-configured-command", {
       adapter: {
-        command: "skw-adapter",
-        args: ["--search"],
-        cwd: "/tmp",
-        timeoutMs: 5000,
+        command: "skw-fixture-adapter",
+        args: ["--stdio"],
+        cwd: "/tmp/skw-workspace",
+        timeoutMs: 1234,
       },
     });
-    const result = await getMemorySearchManager({ cfg, agentId: "skw-populated" });
+    let seenAdapter: unknown;
+    mockSkwCreate.mockImplementationOnce(async (...args: unknown[]) => {
+      const params = args[0] as { resolved: { skw?: { adapter?: unknown } } };
+      seenAdapter = params.resolved.skw?.adapter;
+      return skwManager as MemorySearchManager;
+    });
+
+    // When: the search manager resolves the backend.
+    const result = await getMemorySearchManager({ cfg, agentId: "skw-configured-command" });
+
+    // Then: the resolved adapter command is forwarded without QMD or builtin fallback.
+    expect(result.manager).not.toBeNull();
+    expect(seenAdapter).toEqual({
+      command: "skw-fixture-adapter",
+      args: ["--stdio"],
+      cwd: "/tmp/skw-workspace",
+      timeoutMs: 1234,
+    });
+    expect(checkQmdBinaryAvailability).not.toHaveBeenCalled();
+    expect(createQmdManagerMock).not.toHaveBeenCalled();
+    expect(mockMemoryIndexGet).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when SKW has no configured adapter command", async () => {
+    // Given: SKW is selected but the adapter command is absent.
+    const cfg = createSkwCfg("skw-unwired", { adapter: { command: "   " } });
+
+    // When: the backend resolver is asked for an SKW manager.
+    const result = await getMemorySearchManager({ cfg, agentId: "skw-unwired" });
+
+    // Then: no implicit skw-memory-adapter, QMD, or builtin fallback is used.
     expect(result.manager).toBeNull();
-    expect(result.error).toBe(SKW_MEMORY_ADAPTER_UNWIRED);
+    expect(result.error).toContain("SKW_MEMORY_ADAPTER_UNWIRED");
+    expect(mockSkwCreate).not.toHaveBeenCalled();
+    expect(checkQmdBinaryAvailability).not.toHaveBeenCalled();
+    expect(createQmdManagerMock).not.toHaveBeenCalled();
+    expect(mockMemoryIndexGet).not.toHaveBeenCalled();
+  });
+
+  it("uses cached SKW status instead of creating a second status backend", async () => {
+    // Given: a full SKW manager already exists for the agent.
+    const cfg = createSkwCfg("skw-cached-status", {
+      adapter: { command: "skw-fixture-adapter" },
+    });
+    const full = await getMemorySearchManager({ cfg, agentId: "skw-cached-status" });
+
+    // When: status is requested for the same SKW identity.
+    const status = await getMemorySearchManager({
+      cfg,
+      agentId: "skw-cached-status",
+      purpose: "status",
+    });
+
+    // Then: the cached SKW manager/status path is reused without another factory call.
+    expect(status.manager).toBe(full.manager);
+    expect(mockSkwCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not expose sync on SKW managers", async () => {
+    // Given: SKW has no incremental sync protocol in the frozen adapter contract.
+    const cfg = createSkwCfg("skw-no-sync", {
+      adapter: { command: "skw-fixture-adapter" },
+    });
+
+    // When: the manager is resolved through the shared search-manager seam.
+    const result = await getMemorySearchManager({ cfg, agentId: "skw-no-sync" });
+    const manager = requireManager(result);
+
+    // Then: callers cannot accidentally trigger QMD-style sync on SKW.
+    expect("sync" in manager).toBe(false);
+  });
+
+  it("creates an skw manager when memory.backend is skw and profile is configured", async () => {
+    const cfg = createSkwCfg("skw-normal");
+    const result = await getMemorySearchManager({ cfg, agentId: "skw-normal" });
+
+    expect(result.manager).not.toBeNull();
+    expect(result.manager?.status().backend).toBe("skw");
+    expect(mockSkwCreate).toHaveBeenCalledTimes(1);
+    expect(checkQmdBinaryAvailability).not.toHaveBeenCalled();
+    expect(createQmdManagerMock).not.toHaveBeenCalled();
+    expect(mockMemoryIndexGet).not.toHaveBeenCalled();
+  });
+
+  it("returns an error when skw profile is not configured", async () => {
+    mockSkwCreate.mockRejectedValueOnce(
+      new Error(
+        "memory backend is skw but no profile is mapped for agent skw-no-profile; set memory.skw.profiles",
+      ),
+    );
+    const cfg = createSkwCfg("skw-no-profile", undefined, false);
+    const result = await getMemorySearchManager({ cfg, agentId: "skw-no-profile" });
+
+    expect(result.manager).toBeNull();
+    expect(result.error).toContain("skw memory backend unavailable");
+    expect(result.error).toContain("profile");
+    expect(mockSkwCreate).toHaveBeenCalledTimes(1);
+    expect(checkQmdBinaryAvailability).not.toHaveBeenCalled();
+    expect(createQmdManagerMock).not.toHaveBeenCalled();
+    expect(mockMemoryIndexGet).not.toHaveBeenCalled();
+  });
+
+  it("returns an error when skw manager creation returns null", async () => {
+    mockSkwCreate.mockResolvedValueOnce(null);
+    const cfg = createSkwCfg("skw-null");
+    const result = await getMemorySearchManager({ cfg, agentId: "skw-null" });
+
+    expect(result.manager).toBeNull();
+    expect(result.error).toBe("skw memory backend could not be initialized");
+  });
+
+  it("routes search to the skw manager", async () => {
+    const cfg = createSkwCfg("skw-search");
+    skwManager.search.mockResolvedValueOnce([
+      {
+        path: "SKW.md",
+        startLine: 1,
+        endLine: 1,
+        score: 1,
+        snippet: "skw result",
+        source: "memory",
+      },
+    ]);
+    const result = await getMemorySearchManager({ cfg, agentId: "skw-search" });
+    const manager = requireManager(result);
+
+    const results = await manager.search("hello", { maxResults: 10, minScore: 0 });
+    expect(results).toHaveLength(1);
+    expect(results[0]?.path).toBe("SKW.md");
+    expect(skwManager.search).toHaveBeenCalledWith("hello", {
+      maxResults: 10,
+      minScore: 0,
+    });
+  });
+
+  it("routes readFile to the skw manager", async () => {
+    const cfg = createSkwCfg("skw-read");
+    skwManager.readFile.mockResolvedValueOnce({
+      text: "skw file content",
+      path: "SKW.md",
+      from: 1,
+      lines: 10,
+    });
+    const result = await getMemorySearchManager({ cfg, agentId: "skw-read" });
+    const manager = requireManager(result);
+
+    const read = await manager.readFile({ relPath: "SKW.md", from: 1, lines: 10 });
+    expect(read.text).toBe("skw file content");
+    expect(skwManager.readFile).toHaveBeenCalledWith({
+      relPath: "SKW.md",
+      from: 1,
+      lines: 10,
+    });
   });
 
   it("does not invoke qmd binary checks, qmd manager creation, or builtin manager", async () => {
@@ -1155,5 +1366,56 @@ describe("skw backend fail-closed", () => {
     expect(checkQmdBinaryAvailability).not.toHaveBeenCalled();
     expect(createQmdManagerMock).not.toHaveBeenCalled();
     expect(mockMemoryIndexGet).not.toHaveBeenCalled();
+  });
+});
+
+describe("SKW fixture frozen command protocol", () => {
+  it("validates the fixture manifest against the Frozen Adapter Protocol", async () => {
+    // Given: the A3 fixture manifest is fixture-only and lives beside the fake command.
+    const manifest = await loadSkwProtocolFixtureManifest();
+
+    // When: the frozen protocol validator parses the manifest.
+    const report = validateSkwProtocolFixtureManifest(manifest);
+
+    // Then: every required success/failure/boundary fixture is accepted or rejected intentionally.
+    expect(report.errors).toEqual([]);
+    expect(report.rejected).toEqual(
+      expect.arrayContaining([
+        "reject-invalid-truth-tier",
+        "reject-unsigned-skw-read-path",
+        "reject-raw-read-path",
+        "reject-qmd-read-path",
+        "reject-unknown-profile",
+        "reject-missing-openclaw-fields",
+      ]),
+    );
+  });
+
+  it("runs the named A3 fixture fake direct command with exit code 0", async () => {
+    // Given: the named A3 search fixture command envelope requests the source-line fixture.
+    const request = {
+      version: 1,
+      operation: "search",
+      profile: "host",
+      request: { case: "search-source-file-line", query: "fixture", maxResults: 1 },
+    } as const;
+
+    // When: the fake direct command is invoked as a direct Node child, not through a shell.
+    const result = await runSkwFixtureCommand(request);
+
+    // Then: the command exits successfully and emits a valid SKW fixture response envelope.
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      ok: true,
+      results: [
+        {
+          path: "skw://v1/source-file-line",
+          startLine: 12,
+          endLine: 14,
+          source: "memory",
+        },
+      ],
+    });
   });
 });

@@ -8,6 +8,7 @@ type SearchImpl = (opts?: {
   sessionKey?: string;
   qmdSearchModeOverride?: "query" | "search" | "vsearch";
   onDebug?: (debug: MemorySearchRuntimeDebug) => void;
+  sources?: readonly ("memory" | "sessions")[];
   signal?: AbortSignal;
 }) => Promise<unknown[]>;
 export type MemoryReadParams = { relPath: string; from?: number; lines?: number };

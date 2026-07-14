@@ -21,6 +21,7 @@ export type SkwSessionScope = {
     sourceId: string;
     agentId: string;
     sessionId: string;
+    sessionKey: string;
     memoryKey: string;
     archived: boolean;
   }>;
@@ -45,6 +46,37 @@ type ProcessKeyParts = {
 };
 type ProbeKind = "embedding" | "vector";
 type SearchOptions = NonNullable<Parameters<MemorySearchManager["search"]>[1]>;
+type SkwSessionArtifactMetadata = {
+  readonly agentId: string;
+  readonly archived: boolean;
+  readonly memoryKey: string;
+  readonly sessionId: string;
+  readonly sessionKey: string;
+};
+type SkwSearchResult = MemorySearchResult & {
+  readonly sessionArtifact?: unknown;
+  readonly metadata?: { readonly sessionArtifact?: unknown };
+};
+type SkwMemorySearchManagerParams = {
+  readonly agentId: string;
+  readonly resolved: ResolvedSkwConfig;
+  readonly sessionMappingProvider?: SkwSessionMappingProvider;
+};
+type SignedHandleLease = {
+  readonly agentId: string;
+  readonly profile: string;
+  readonly processKey: string;
+  readonly process: SkwProviderProcess;
+  readonly processGeneration: number;
+  readonly processState: SkwProviderProcess["state"];
+  readonly source: MemorySource;
+  readonly sessionKey?: string;
+  readonly sessionArtifact?: SkwSessionArtifactMetadata;
+  readonly expiresAtMs: number;
+};
+
+const SIGNED_HANDLE_TTL_MS = 300_000;
+const skwV1OpaqueHandlePattern = /^skw:\/\/v1\/[^/?#\s]+$/u;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -149,7 +181,7 @@ function isMemorySource(value: unknown): value is MemorySource {
   return value === "memory" || value === "sessions";
 }
 
-function isSearchResult(value: unknown): value is MemorySearchResult {
+function isSearchResult(value: unknown): value is SkwSearchResult {
   return (
     isRecord(value) &&
     typeof value.path === "string" &&
@@ -161,7 +193,50 @@ function isSearchResult(value: unknown): value is MemorySearchResult {
   );
 }
 
-function parseSearchResults(value: unknown): MemorySearchResult[] {
+function isSignedSkwReadHandle(value: string): boolean {
+  return skwV1OpaqueHandlePattern.test(value);
+}
+
+function parseSessionArtifact(value: unknown): SkwSessionArtifactMetadata | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  if (
+    typeof value.agentId !== "string" ||
+    typeof value.archived !== "boolean" ||
+    typeof value.memoryKey !== "string" ||
+    typeof value.sessionId !== "string" ||
+    typeof value.sessionKey !== "string" ||
+    !value.agentId.trim() ||
+    !value.memoryKey.trim() ||
+    !value.sessionId.trim() ||
+    !value.sessionKey.trim()
+  ) {
+    return undefined;
+  }
+  return {
+    agentId: value.agentId,
+    archived: value.archived,
+    memoryKey: value.memoryKey,
+    sessionId: value.sessionId,
+    sessionKey: value.sessionKey,
+  };
+}
+
+function sessionArtifactFromResult(
+  result: SkwSearchResult,
+): SkwSessionArtifactMetadata | undefined {
+  return (
+    parseSessionArtifact(result.sessionArtifact) ??
+    parseSessionArtifact(result.metadata?.sessionArtifact)
+  );
+}
+
+function signedHandlesFromResult(result: SkwSearchResult): string[] {
+  return isSignedSkwReadHandle(result.path) ? [result.path] : [];
+}
+
+function parseSearchResults(value: unknown): SkwSearchResult[] {
   return isRecord(value) && Array.isArray(value.results)
     ? value.results.filter(isSearchResult)
     : [];
@@ -182,9 +257,10 @@ export class SkwMemorySearchManager implements MemorySearchManager {
   private readonly timeoutMs: number;
   private process: SkwProviderProcess | null = null;
   private statusCache: MemoryProviderStatus;
+  private readonly signedHandleLeases = new Map<string, SignedHandleLease>();
   private closed = false;
 
-  private constructor(private readonly params: { agentId: string; resolved: ResolvedSkwConfig }) {
+  private constructor(private readonly params: SkwMemorySearchManagerParams) {
     this.keyParts = processKeyParts(params.agentId, params.resolved);
     this.key = JSON.stringify(this.keyParts);
     const replacementParts = {
@@ -214,7 +290,11 @@ export class SkwMemorySearchManager implements MemorySearchManager {
     if (!resolved) {
       return null;
     }
-    const manager = new SkwMemorySearchManager({ agentId: params.agentId, resolved });
+    const manager = new SkwMemorySearchManager({
+      agentId: params.agentId,
+      resolved,
+      sessionMappingProvider: params.sessionMappingProvider,
+    });
     await manager.initialize();
     return manager;
   }
@@ -224,31 +304,47 @@ export class SkwMemorySearchManager implements MemorySearchManager {
   }
 
   async search(query: string, opts?: SearchOptions): Promise<MemorySearchResult[]> {
-    const result = await this.request(
+    const process = await this.ensureProcess();
+    const sessionScope =
+      this.params.sessionMappingProvider?.resolveSessionScope({
+        agentId: this.params.agentId,
+        sessionKey: opts?.sessionKey,
+        sources: opts?.sources,
+      }) ?? undefined;
+    const result = await this.requestWithProcess(
+      process,
       "search",
       {
         query,
         maxResults: opts?.maxResults,
         minScore: opts?.minScore,
         sessionKey: opts?.sessionKey,
+        sessionScope,
         sources: opts?.sources,
       },
       opts?.signal,
     );
     await this.refreshStatusAfterOperation();
-    return parseSearchResults(result);
+    const results = parseSearchResults(result);
+    this.rememberSignedHandles(results, process, opts?.sessionKey);
+    return results;
   }
 
   async readFile(params: {
     relPath: string;
     from?: number;
     lines?: number;
+    sessionKey?: string;
   }): Promise<MemoryReadResult> {
-    const result = await this.request("read", {
+    const process = this.authorizeReadProcess(params);
+    const readParams = {
       relPath: params.relPath,
       from: params.from,
       lines: params.lines,
-    });
+    };
+    const result = await (process
+      ? this.requestWithProcess(process, "read", readParams)
+      : this.request("read", readParams));
     await this.refreshStatusAfterOperation();
     return parseReadResult(result);
   }
@@ -317,6 +413,99 @@ export class SkwMemorySearchManager implements MemorySearchManager {
     return { agentId: this.params.agentId, profile: this.keyParts.profile };
   }
 
+  private rememberSignedHandles(
+    results: readonly MemorySearchResult[],
+    process: SkwProviderProcess,
+    sessionKey: string | undefined,
+  ): void {
+    for (const result of results) {
+      for (const handle of signedHandlesFromResult(result)) {
+        this.signedHandleLeases.set(handle, {
+          agentId: this.params.agentId,
+          profile: this.keyParts.profile,
+          processKey: this.key,
+          process,
+          processGeneration: process.childGeneration,
+          processState: process.state,
+          source: result.source,
+          sessionKey,
+          sessionArtifact: sessionArtifactFromResult(result),
+          expiresAtMs: Date.now() + SIGNED_HANDLE_TTL_MS,
+        });
+      }
+    }
+  }
+
+  private authorizeReadProcess(params: {
+    readonly relPath: string;
+    readonly sessionKey?: string;
+  }): SkwProviderProcess | null {
+    if (!isSignedSkwReadHandle(params.relPath)) {
+      if (params.relPath.startsWith("skw://")) {
+        throw new SkwProviderError("DENIED", "signed SKW handle syntax is invalid");
+      }
+      return null;
+    }
+    const lease = this.signedHandleLeases.get(params.relPath);
+    if (!lease) {
+      throw new SkwProviderError("DENIED", "signed SKW handle was not issued by this manager");
+    }
+    if (lease.expiresAtMs <= Date.now()) {
+      this.signedHandleLeases.delete(params.relPath);
+      throw new SkwProviderError("DENIED", "signed SKW handle expired");
+    }
+    if (
+      lease.agentId !== this.params.agentId ||
+      lease.profile !== this.keyParts.profile ||
+      lease.processKey !== this.key
+    ) {
+      throw new SkwProviderError("DENIED", "signed SKW handle identity mismatch");
+    }
+    if (
+      this.process !== lease.process ||
+      lease.processGeneration !== lease.process.childGeneration ||
+      lease.process.state === "closing" ||
+      lease.process.state === "closed" ||
+      lease.process.state === "failed"
+    ) {
+      throw new SkwProviderError("DENIED", "signed SKW handle process is no longer alive");
+    }
+    if (lease.sessionKey !== params.sessionKey) {
+      throw new SkwProviderError("DENIED", "signed SKW handle requester session mismatch");
+    }
+    if (lease.source !== "sessions") {
+      return lease.process;
+    }
+    const artifact = lease.sessionArtifact;
+    if (!artifact) {
+      throw new SkwProviderError(
+        "DENIED",
+        "signed SKW session handle is missing identity metadata",
+      );
+    }
+    if (artifact.archived) {
+      throw new SkwProviderError(
+        "DENIED",
+        "signed SKW session handle points at an archived session",
+      );
+    }
+    if (artifact.agentId !== this.params.agentId || artifact.sessionKey !== params.sessionKey) {
+      throw new SkwProviderError("DENIED", "signed SKW session handle identity mismatch");
+    }
+    const currentScope = this.params.sessionMappingProvider?.resolveSessionScope({
+      agentId: this.params.agentId,
+      sessionKey: params.sessionKey,
+      sources: ["sessions"],
+    });
+    const currentSession = currentScope?.mappings.find(
+      (mapping) => mapping.sessionKey === params.sessionKey,
+    );
+    if (currentSession?.sessionId !== artifact.sessionId) {
+      throw new SkwProviderError("DENIED", "signed SKW session handle is no longer current");
+    }
+    return lease.process;
+  }
+
   private async ensureProcess(): Promise<SkwProviderProcess> {
     if (this.closed) {
       throw new SkwProviderError("UNAVAILABLE", "manager is closed", true);
@@ -337,6 +526,15 @@ export class SkwMemorySearchManager implements MemorySearchManager {
     signal?: AbortSignal,
   ): Promise<unknown> {
     const process = await this.ensureProcess();
+    return this.requestWithProcess(process, op, params, signal);
+  }
+
+  private async requestWithProcess(
+    process: SkwProviderProcess,
+    op: string,
+    params: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<unknown> {
     try {
       return await process.request({
         op,
