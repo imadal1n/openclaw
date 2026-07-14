@@ -20,7 +20,6 @@ import {
   resolveMemoryDeepDreamingConfig,
 } from "openclaw/plugin-sdk/memory-core-host-status";
 import { asRecord } from "./dreaming-shared.js";
-import { SKW_MEMORY_ADAPTER_UNWIRED } from "./memory/skw-unwired-message.js";
 import { filterMemorySearchHitsBySessionVisibility } from "./session-search-visibility.js";
 import { recordShortTermRecalls } from "./short-term-promotion.js";
 import {
@@ -39,6 +38,11 @@ import {
   MemorySearchSchema,
   searchMemoryCorpusSupplements,
 } from "./tools.shared.js";
+import {
+  isSignedSkwReadPath,
+  normalizeSkwMemoryReadResult,
+  normalizeSkwMemorySearchResult,
+} from "./tools.skw-metadata.js";
 
 type MemorySearchToolResult =
   | (MemorySearchResult & { corpus: MemorySource })
@@ -420,8 +424,12 @@ export function createMemorySearchTool(options: {
             const shouldQuerySupplements = requestedCorpus === "wiki" || requestedCorpus === "all";
             const shouldQueryMemory = requestedCorpus !== "wiki" && !cooldown;
             const backendConfig = resolveMemoryBackendConfig({ cfg, agentId });
-            if (backendConfig.backend === "skw" && requestedCorpus !== "wiki") {
-              return jsonResult(buildMemorySearchUnavailableResult(SKW_MEMORY_ADAPTER_UNWIRED));
+            if (backendConfig.backend === "skw" && requestedCorpus === "wiki") {
+              return jsonResult(
+                buildMemorySearchUnavailableResult(
+                  "skw memory backend does not support wiki corpus",
+                ),
+              );
             }
             if (cooldown && !shouldQuerySupplements) {
               return jsonResult(buildMemorySearchUnavailableResult(cooldown.error));
@@ -536,7 +544,11 @@ export function createMemorySearchTool(options: {
                   if (pausedIndexIdentityReason) {
                     return;
                   }
-                  if (rawResults.length === 0 && activeMemory.manager.sync) {
+                  if (
+                    rawResults.length === 0 &&
+                    activeMemory.manager.sync &&
+                    statusBeforeRetry.backend !== "skw"
+                  ) {
                     await activeMemory.manager.sync({ reason: "search", force: true });
                     rawResults = await activeMemory.manager.search(query, searchOptions);
                     pausedIndexIdentityReason = resolvePausedMemoryIndexIdentityReason(
@@ -559,7 +571,9 @@ export function createMemorySearchTool(options: {
                     rawResults = rawResults.filter((hit) => hit.source === "memory");
                   }
                   const status = activeMemory.manager.status();
-                  const decorated = decorateCitations(rawResults, includeCitations);
+                  const decorated = decorateCitations(rawResults, includeCitations).map((result) =>
+                    normalizeSkwMemorySearchResult(result, status.backend),
+                  );
                   const resolved = resolveMemoryBackendConfig({ cfg, agentId });
                   const memoryResults =
                     status.backend === "qmd"
@@ -699,12 +713,14 @@ export function createMemoryGetTool(options: {
         }
         const resolved = resolveMemoryBackendConfig({ cfg, agentId });
         if (resolved.backend === "skw") {
-          return jsonResult({
-            path: relPath,
-            text: "",
-            disabled: true,
-            error: SKW_MEMORY_ADAPTER_UNWIRED,
-          });
+          if (!isSignedSkwReadPath(relPath)) {
+            return jsonResult({
+              path: relPath,
+              text: "",
+              disabled: true,
+              error: "skw memory backend requires a skw://v1/<opaque-token> read handle",
+            });
+          }
         }
         if (resolved.backend === "builtin") {
           return await executeMemoryReadResult({
@@ -733,11 +749,14 @@ export function createMemoryGetTool(options: {
         }
         return await executeMemoryReadResult({
           read: async () =>
-            await memory.manager.readFile({
-              relPath,
-              from: from ?? undefined,
-              lines: lines ?? undefined,
-            }),
+            normalizeSkwMemoryReadResult(
+              await memory.manager.readFile({
+                relPath,
+                from: from ?? undefined,
+                lines: lines ?? undefined,
+              }),
+              resolved.backend,
+            ),
           requestedCorpus,
           relPath,
           from: from ?? undefined,

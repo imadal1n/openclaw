@@ -10,10 +10,11 @@ import {
   resetMemoryToolMockState,
   setMemoryBackend,
   setMemoryCustomStatus,
+  setMemoryReadFileImpl,
   setMemorySearchImpl,
   setMemorySearchManagerImpl,
 } from "./memory-tool-manager.test-mocks.js";
-import { SKW_MEMORY_ADAPTER_UNWIRED } from "./memory/skw-unwired-message.js";
+import { attachQmdSessionArtifactHit } from "./qmd-session-artifacts.js";
 import { createMemorySearchTool, testing as memoryToolsTesting } from "./tools.js";
 import {
   buildMemorySearchUnavailableResult,
@@ -615,104 +616,274 @@ describe("memory_search corpus labels", () => {
   });
 });
 
-describe("memory_search skw fail-closed", () => {
+describe("memory_search skw wired", () => {
   beforeEach(() => {
     resetMemoryToolMockState({ searchImpl: async () => [] });
     memoryToolsTesting.resetMemorySearchToolCooldowns();
     setMemoryBackend("skw");
   });
 
-  it("returns unavailable for default corpus", async () => {
+  it("returns empty results for default corpus", async () => {
     const tool = createMemorySearchToolOrThrow();
     const result = await tool.execute("skw-default", { query: "hello" });
-    expectUnavailableMemorySearchDetails(result.details, {
-      error: SKW_MEMORY_ADAPTER_UNWIRED,
-      warning: "Memory search is unavailable due to an embedding/provider error.",
-      action: "Check embedding provider configuration and retry memory_search.",
-    });
-    expect(getMemorySearchManagerMockCalls()).toBe(0);
+    const details = result.details as { results: unknown[]; disabled?: boolean };
+    expect(details.results).toEqual([]);
+    expect(details.disabled).toBeUndefined();
+    expect(getMemorySearchManagerMockCalls()).toBeGreaterThan(0);
   });
 
-  it("returns unavailable for memory corpus", async () => {
+  it("does not force sync after an empty SKW search result", async () => {
+    // Given: SKW is the active backend and returns a valid empty result set.
+    const tool = createMemorySearchToolOrThrow();
+
+    // When: memory_search receives no SKW hits.
+    const result = await tool.execute("skw-empty-no-sync", { query: "missing" });
+
+    // Then: OpenClaw returns the empty result without invoking a QMD/builtin sync fallback.
+    expect((result.details as { results?: unknown[] }).results).toEqual([]);
+    expect(getMemorySyncMockCalls()).toBe(0);
+  });
+
+  it("returns empty results for memory corpus", async () => {
     const tool = createMemorySearchToolOrThrow();
     const result = await tool.execute("skw-memory", { query: "hello", corpus: "memory" });
-    expectUnavailableMemorySearchDetails(result.details, {
-      error: SKW_MEMORY_ADAPTER_UNWIRED,
-      warning: "Memory search is unavailable due to an embedding/provider error.",
-      action: "Check embedding provider configuration and retry memory_search.",
-    });
-    expect(getMemorySearchManagerMockCalls()).toBe(0);
+    const details = result.details as { results: unknown[]; disabled?: boolean };
+    expect(details.results).toEqual([]);
+    expect(details.disabled).toBeUndefined();
+    expect(getMemorySearchManagerMockCalls()).toBeGreaterThan(0);
   });
 
-  it("returns unavailable for all corpus", async () => {
+  it("returns empty results for all corpus", async () => {
     const tool = createMemorySearchToolOrThrow();
     const result = await tool.execute("skw-all", { query: "hello", corpus: "all" });
+    const details = result.details as { results: unknown[]; disabled?: boolean };
+    expect(details.results).toEqual([]);
+    expect(details.disabled).toBeUndefined();
+    expect(getMemorySearchManagerMockCalls()).toBeGreaterThan(0);
+  });
+
+  it("routes sessions corpus through SKW session scope and reports SKW debug backend", async () => {
+    // Given: SKW is active and the caller is bound to a visible OpenClaw session.
+    let seenSources: readonly string[] | undefined;
+    let seenSessionKey: string | undefined;
+    setMemorySearchImpl(async (opts) => {
+      seenSources = opts?.sources;
+      seenSessionKey = opts?.sessionKey;
+      opts?.onDebug?.({ backend: "skw" });
+      return [
+        attachQmdSessionArtifactHit(
+          {
+            path: "skw://v1/session-current",
+            source: "sessions",
+            score: 1,
+            snippet: "session memory",
+            startLine: 20,
+            endLine: 24,
+          },
+          {
+            agentId: "main",
+            archived: false,
+            memoryKey: "transcript:main:thread-1",
+            sessionId: "thread-1",
+          },
+        ),
+      ];
+    });
+    const tool = createMemorySearchToolOrThrow({ agentSessionKey: "agent:main:main" });
+
+    // When: memory_search requests only the sessions corpus.
+    const result = await tool.execute("skw-sessions", {
+      query: "session",
+      corpus: "sessions",
+    });
+    const details = result.details as {
+      debug?: { backend?: unknown };
+      results?: Array<{ corpus: string; path: string }>;
+    };
+
+    // Then: the request is scoped to sessions and the external debug surface stays SKW-native.
+    expect(seenSources).toEqual(["sessions"]);
+    expect(seenSessionKey).toBe("agent:main:main");
+    expect(details.results).toEqual([
+      expect.objectContaining({
+        corpus: "sessions",
+        path: "skw://v1/session-current",
+      }),
+    ]);
+    expect(details.debug?.backend).toBe("skw");
+    expect(details.debug?.backend).not.toBe("qmd");
+  });
+
+  it("fails closed when SKW sessions corpus has no trusted mapping", async () => {
+    // Given: SKW refuses a session-corpus query because OpenClaw has no trusted mapping.
+    setMemorySearchImpl(async () => {
+      throw new Error("skw session search denied: no trusted session mapping available");
+    });
+    const tool = createMemorySearchToolOrThrow({ agentSessionKey: "agent:main:main" });
+
+    // When: memory_search requests sessions through SKW.
+    const result = await tool.execute("skw-sessions-denied", {
+      query: "session",
+      corpus: "sessions",
+    });
+
+    // Then: the tool returns an unavailable result instead of falling back to QMD or unscoped search.
     expectUnavailableMemorySearchDetails(result.details, {
-      error: SKW_MEMORY_ADAPTER_UNWIRED,
+      error: "skw session search denied: no trusted session mapping available",
       warning: "Memory search is unavailable due to an embedding/provider error.",
       action: "Check embedding provider configuration and retry memory_search.",
     });
-    expect(getMemorySearchManagerMockCalls()).toBe(0);
+    expect(getMemorySyncMockCalls()).toBe(0);
   });
 
   it("bypasses memory backend for wiki corpus", async () => {
     const tool = createMemorySearchToolOrThrow();
     const result = await tool.execute("skw-wiki", { query: "hello", corpus: "wiki" });
-    expect(result.details).not.toEqual(
+    expect(result.details).toEqual(
       expect.objectContaining({
         disabled: true,
-        error: SKW_MEMORY_ADAPTER_UNWIRED,
+        error: "skw memory backend does not support wiki corpus",
       }),
     );
     expect(getMemorySearchManagerMockCalls()).toBe(0);
   });
 });
 
-describe("memory_get skw fail-closed", () => {
+describe("memory_get skw wired", () => {
   beforeEach(() => {
     resetMemoryToolMockState({ searchImpl: async () => [] });
     setMemoryBackend("skw");
   });
 
-  it("returns disabled for default corpus", async () => {
+  it("reads signed SKW paths through memory_get for default corpus", async () => {
+    const signedPath = "skw://v1/source-file-line";
+    setMemoryReadFileImpl(async (params) => ({
+      path: params.relPath,
+      text: "fixture source line result",
+      from: params.from ?? 12,
+      lines: params.lines ?? 1,
+    }));
     const tool = createMemoryGetToolOrThrow();
-    const result = await tool.execute("skw-get-default", { path: "MEMORY.md" });
+    const result = await tool.execute("skw-get-default", { path: signedPath, from: 12, lines: 1 });
     expect(result.details).toEqual({
-      path: "MEMORY.md",
+      path: signedPath,
+      text: "fixture source line result",
+      from: 12,
+      lines: 1,
+    });
+    expect(getMemorySearchManagerMockCalls()).toBeGreaterThan(0);
+    expect(getReadAgentMemoryFileMockCalls()).toBe(0);
+  });
+
+  it("reads signed SKW paths through memory_get", async () => {
+    // Given: SKW returns a signed read result from the manager boundary.
+    const signedPath = "skw://v1/source-file-line";
+    setMemoryReadFileImpl(async (params) => ({
+      path: params.relPath,
+      text: "fixture source line result\nsecond line\nthird line",
+      from: params.from ?? 12,
+      lines: params.lines ?? 3,
+      truncated: false,
+    }));
+    const tool = createMemoryGetToolOrThrow();
+
+    // When: memory_get is called with the signed path.
+    const result = await tool.execute("skw-get-signed", {
+      path: signedPath,
+      from: 12,
+      lines: 3,
+    });
+
+    // Then: the signed path is read through the SKW manager and line parity is kept.
+    expect(result.details).toEqual({
+      path: signedPath,
+      text: "fixture source line result\nsecond line\nthird line",
+      from: 12,
+      lines: 3,
+      truncated: false,
+    });
+    expect(getMemorySearchManagerMockCalls()).toBeGreaterThan(0);
+    expect(getReadAgentMemoryFileMockCalls()).toBe(0);
+  });
+
+  it("rejects raw and QMD paths before memory_get can read through SKW", async () => {
+    // Given: SKW is active and the caller supplies paths outside the signed SKW namespace.
+    const tool = createMemoryGetToolOrThrow();
+
+    // When: memory_get receives a raw filesystem path.
+    const rawResult = await tool.execute("skw-get-raw", { path: "/srv/skw/raw.md" });
+
+    // Then: it fails closed without invoking either SKW read or builtin memory file reads.
+    expect(rawResult.details).toEqual({
+      path: "/srv/skw/raw.md",
       text: "",
       disabled: true,
-      error: SKW_MEMORY_ADAPTER_UNWIRED,
+      error: "skw memory backend requires a skw://v1/<opaque-token> read handle",
+    });
+    expect(getMemorySearchManagerMockCalls()).toBe(0);
+    expect(getReadAgentMemoryFileMockCalls()).toBe(0);
+
+    // When: memory_get receives a QMD path.
+    const qmdResult = await tool.execute("skw-get-qmd", { path: "qmd://sessions/fixture" });
+
+    // Then: QMD is rejected as a fallback path for SKW too.
+    expect(qmdResult.details).toEqual({
+      path: "qmd://sessions/fixture",
+      text: "",
+      disabled: true,
+      error: "skw memory backend requires a skw://v1/<opaque-token> read handle",
     });
     expect(getMemorySearchManagerMockCalls()).toBe(0);
     expect(getReadAgentMemoryFileMockCalls()).toBe(0);
   });
 
-  it("returns disabled for memory corpus", async () => {
+  it("reads signed SKW paths through memory_get for memory corpus", async () => {
+    const signedPath = "skw://v1/source-file-line";
+    setMemoryReadFileImpl(async (params) => ({
+      path: params.relPath,
+      text: "fixture source line result",
+      from: params.from ?? 12,
+      lines: params.lines ?? 1,
+    }));
     const tool = createMemoryGetToolOrThrow();
     const result = await tool.execute("skw-get-memory", {
-      path: "MEMORY.md",
+      path: signedPath,
       corpus: "memory",
+      from: 12,
+      lines: 1,
     });
     expect(result.details).toEqual({
-      path: "MEMORY.md",
-      text: "",
-      disabled: true,
-      error: SKW_MEMORY_ADAPTER_UNWIRED,
+      path: signedPath,
+      text: "fixture source line result",
+      from: 12,
+      lines: 1,
     });
-    expect(getMemorySearchManagerMockCalls()).toBe(0);
+    expect(getMemorySearchManagerMockCalls()).toBeGreaterThan(0);
     expect(getReadAgentMemoryFileMockCalls()).toBe(0);
   });
 
-  it("returns disabled for all corpus", async () => {
+  it("reads signed SKW paths through memory_get for all corpus", async () => {
+    const signedPath = "skw://v1/source-file-line";
+    setMemoryReadFileImpl(async (params) => ({
+      path: params.relPath,
+      text: "fixture source line result",
+      from: params.from ?? 12,
+      lines: params.lines ?? 1,
+    }));
     const tool = createMemoryGetToolOrThrow();
-    const result = await tool.execute("skw-get-all", { path: "MEMORY.md", corpus: "all" });
-    expect(result.details).toEqual({
-      path: "MEMORY.md",
-      text: "",
-      disabled: true,
-      error: SKW_MEMORY_ADAPTER_UNWIRED,
+    const result = await tool.execute("skw-get-all", {
+      path: signedPath,
+      corpus: "all",
+      from: 12,
+      lines: 1,
     });
-    expect(getMemorySearchManagerMockCalls()).toBe(0);
+    expect(result.details).toEqual({
+      path: signedPath,
+      text: "fixture source line result",
+      from: 12,
+      lines: 1,
+    });
+    expect(getMemorySearchManagerMockCalls()).toBeGreaterThan(0);
     expect(getReadAgentMemoryFileMockCalls()).toBe(0);
   });
 

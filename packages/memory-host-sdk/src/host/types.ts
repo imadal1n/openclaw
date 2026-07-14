@@ -2,6 +2,56 @@
 // package consumers.
 export type MemorySource = "memory" | "sessions";
 
+export type SkwTruthTier =
+  | "canonical"
+  | "accepted"
+  | "runtime_fact"
+  | "working"
+  | "raw_observation";
+export type SkwVisibility = "shared" | "private";
+
+export type SkwSessionArtifactMetadata = {
+  readonly agentId: string;
+  readonly archived: boolean;
+  readonly memoryKey: string;
+  readonly sessionId: string;
+  readonly sessionKey: string;
+};
+
+export type SkwMemoryMetadata = {
+  readonly backend: "skw";
+  readonly truthTier?: SkwTruthTier;
+  readonly visibility?: SkwVisibility;
+  readonly priority?: string | number;
+  readonly authority?: string;
+  readonly sourceType?: string;
+  readonly primaryReason?: string;
+  readonly matchReasons?: readonly string[];
+  readonly expandedQuery?: string;
+  readonly ranking?: Readonly<Record<string, unknown>>;
+  readonly displayPath?: string;
+  readonly collection?: string;
+  readonly handles?: readonly string[];
+  readonly sessionArtifact?: SkwSessionArtifactMetadata;
+};
+
+export type SkwMemoryMetadataCarrier = {
+  readonly metadata?: SkwMemoryMetadata;
+  readonly truthTier?: unknown;
+  readonly visibility?: unknown;
+  readonly priority?: unknown;
+  readonly authority?: unknown;
+  readonly sourceType?: unknown;
+  readonly primaryReason?: unknown;
+  readonly matchReasons?: unknown;
+  readonly expandedQuery?: unknown;
+  readonly ranking?: unknown;
+  readonly displayPath?: unknown;
+  readonly collection?: unknown;
+  readonly handles?: unknown;
+  readonly sessionArtifact?: unknown;
+};
+
 /** One ranked memory search hit with optional vector/text scoring details. */
 export type MemorySearchResult = {
   path: string;
@@ -13,7 +63,7 @@ export type MemorySearchResult = {
   snippet: string;
   source: MemorySource;
   citation?: string;
-};
+} & SkwMemoryMetadataCarrier;
 
 /** Cached/probed embedding availability status. */
 export type MemoryEmbeddingProbeResult = {
@@ -70,7 +120,7 @@ export type MemoryReadResult = {
   from?: number;
   lines?: number;
   nextFrom?: number;
-};
+} & SkwMemoryMetadataCarrier;
 
 /** Aggregated memory backend status for CLI/UI diagnostics. */
 export type MemoryProviderStatus = {
@@ -127,7 +177,12 @@ export interface MemorySearchManager {
       signal?: AbortSignal;
     },
   ): Promise<MemorySearchResult[]>;
-  readFile(params: { relPath: string; from?: number; lines?: number }): Promise<MemoryReadResult>;
+  readFile(params: {
+    relPath: string;
+    from?: number;
+    lines?: number;
+    sessionKey?: string;
+  }): Promise<MemoryReadResult>;
   status(): MemoryProviderStatus;
   sync?(params?: MemorySyncParams): Promise<void>;
   getCachedEmbeddingAvailability?(): MemoryEmbeddingProbeResult | null;
