@@ -1,5 +1,7 @@
 // Memory Core plugin module implements search manager behavior.
 import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import {
   createSubsystemLogger,
@@ -7,6 +9,7 @@ import {
   resolveAgentWorkspaceDir,
   resolveGlobalSingleton,
   resolveMemorySearchSyncConfig,
+  resolveStateDir,
   type OpenClawConfig,
 } from "openclaw/plugin-sdk/memory-core-host-engine-foundation";
 import {
@@ -21,9 +24,12 @@ import {
   type MemorySource,
   type MemorySyncParams,
   type ResolvedQmdConfig,
+  type ResolvedSkwConfig,
 } from "openclaw/plugin-sdk/memory-core-host-engine-storage";
 import { normalizeAgentId } from "openclaw/plugin-sdk/routing";
-import { SKW_MEMORY_ADAPTER_UNWIRED } from "./skw-unwired-message.js";
+import { createQmdSessionArtifactMappingReader } from "../qmd-session-artifacts.js";
+import { SkwMemorySearchManager, type SkwSessionMappingProvider } from "./skw-manager.js";
+import { skwProviderPool } from "./skw-provider-pool.js";
 
 const MEMORY_SEARCH_MANAGER_CACHE_KEY = Symbol.for("openclaw.memorySearchManagerCache");
 type Maybe<T> = T | null;
@@ -49,10 +55,16 @@ type QmdManagerOpenFailure = {
   retryAfterMs: number;
 };
 
+type SkwManagerCacheEntry = {
+  identityKey: string;
+  manager: SkwMemorySearchManager;
+};
+
 type MemorySearchManagerCacheStore = {
   qmdManagerCache: Map<string, CachedQmdManagerEntry>;
   pendingQmdManagerCreates: Map<string, PendingQmdManagerCreate>;
   qmdManagerOpenFailures: Map<string, QmdManagerOpenFailure>;
+  skwManagerCache: Map<string, SkwManagerCacheEntry>;
 };
 
 const QMD_MANAGER_OPEN_FAILURE_COOLDOWN_MS = 60_000;
@@ -62,6 +74,7 @@ function createMemorySearchManagerCacheStore(): MemorySearchManagerCacheStore {
     qmdManagerCache: new Map<string, CachedQmdManagerEntry>(),
     pendingQmdManagerCreates: new Map<string, PendingQmdManagerCreate>(),
     qmdManagerOpenFailures: new Map<string, QmdManagerOpenFailure>(),
+    skwManagerCache: new Map<string, SkwManagerCacheEntry>(),
   };
 }
 
@@ -81,6 +94,9 @@ function getMemorySearchManagerCacheStore(): MemorySearchManagerCacheStore {
     if (!(cacheStore.qmdManagerOpenFailures instanceof Map)) {
       cacheStore.qmdManagerOpenFailures = new Map<string, QmdManagerOpenFailure>();
     }
+    if (!(cacheStore.skwManagerCache instanceof Map)) {
+      cacheStore.skwManagerCache = new Map<string, SkwManagerCacheEntry>();
+    }
     return cacheStore as MemorySearchManagerCacheStore;
   }
   const repaired = createMemorySearchManagerCacheStore();
@@ -93,6 +109,7 @@ const {
   qmdManagerCache: QMD_MANAGER_CACHE,
   pendingQmdManagerCreates: PENDING_QMD_MANAGER_CREATES,
   qmdManagerOpenFailures: QMD_MANAGER_OPEN_FAILURES,
+  skwManagerCache: SKW_MANAGER_CACHE,
 } = getMemorySearchManagerCacheStore();
 let managerRuntimePromise: Promise<typeof import("../../manager-runtime.js")> | null = null;
 let qmdManagerModulePromise: Promise<typeof import("./qmd-manager.js")> | null = null;
@@ -157,7 +174,37 @@ export async function getMemorySearchManager(params: {
 }): Promise<MemorySearchManagerResult> {
   const resolved = resolveMemoryBackendConfig(params);
   if (resolved.backend === "skw") {
-    return { manager: null, error: SKW_MEMORY_ADAPTER_UNWIRED };
+    const skwConfig = resolved.skw;
+    if (!skwConfig?.adapter?.command?.trim()) {
+      return { manager: null, error: "SKW_MEMORY_ADAPTER_UNWIRED" };
+    }
+    const normalizedAgentId = normalizeAgentId(params.agentId);
+    const scopeKey = buildQmdManagerScopeKey(normalizedAgentId);
+    const identityKey = buildSkwManagerIdentityKey(normalizedAgentId, skwConfig);
+    const cached = SKW_MANAGER_CACHE.get(scopeKey);
+    if (cached?.identityKey === identityKey) {
+      return { manager: cached.manager };
+    }
+    try {
+      const manager = await SkwMemorySearchManager.create({
+        cfg: params.cfg,
+        agentId: normalizedAgentId,
+        resolved,
+        sessionMappingProvider: createSkwSessionMappingProvider({
+          cfg: params.cfg,
+          agentId: normalizedAgentId,
+        }),
+      });
+      if (!manager) {
+        return { manager: null, error: "skw memory backend could not be initialized" };
+      }
+      SKW_MANAGER_CACHE.set(scopeKey, { identityKey, manager });
+      return { manager };
+    } catch (err) {
+      const message = formatErrorMessage(err);
+      log.warn(`skw memory backend unavailable: ${message}`);
+      return { manager: null, error: `skw memory backend unavailable: ${message}` };
+    }
   }
   if (resolved.backend === "qmd" && resolved.qmd) {
     const qmdResolved = resolved.qmd;
@@ -422,6 +469,16 @@ export async function closeAllMemorySearchManagers(): Promise<void> {
       log.warn(`failed to close qmd memory manager: ${String(err)}`);
     }
   }
+  const skwManagers = Array.from(SKW_MANAGER_CACHE.values(), (entry) => entry.manager);
+  SKW_MANAGER_CACHE.clear();
+  for (const manager of skwManagers) {
+    try {
+      await manager.close?.();
+    } catch (err) {
+      log.warn(`failed to close skw memory manager: ${formatErrorMessage(err)}`);
+    }
+  }
+  await skwProviderPool.closeAll();
   if (managerRuntimePromise !== null) {
     const { closeAllMemoryIndexManagers } = await loadManagerRuntime();
     await closeAllMemoryIndexManagers();
@@ -446,6 +503,17 @@ export async function closeMemorySearchManager(params: {
       await cached.manager.close?.();
     } catch (err) {
       log.warn(`failed to close qmd memory manager for agent ${normalizedAgentId}: ${String(err)}`);
+    }
+  }
+  const skwCached = SKW_MANAGER_CACHE.get(scopeKey);
+  if (skwCached) {
+    SKW_MANAGER_CACHE.delete(scopeKey);
+    try {
+      await skwCached.manager.close?.();
+    } catch (err) {
+      log.warn(
+        `failed to close skw memory manager for agent ${normalizedAgentId}: ${formatErrorMessage(err)}`,
+      );
     }
   }
   if (managerRuntimePromise !== null) {
@@ -671,6 +739,51 @@ function buildQmdManagerIdentityKey(
   // ResolvedQmdConfig is assembled in a stable field order in resolveMemoryBackendConfig.
   // Fast stringify avoids deep key-sorting overhead on this hot path.
   return `${agentId}:${JSON.stringify(config)}:${JSON.stringify(runtimeConfig.syncSettings ?? null)}:${JSON.stringify(runtimeConfig.contextLimits ?? null)}:${runtimeConfig.workspaceDir}`;
+}
+
+function buildSkwManagerIdentityKey(agentId: string, config: ResolvedSkwConfig): string {
+  return `${agentId}:${JSON.stringify(config)}`;
+}
+
+function resolveQmdIndexPath(agentId: string): string {
+  const stateDir = resolveStateDir(process.env, os.homedir);
+  return path.join(stateDir, "agents", agentId, "qmd", "xdg-cache", "qmd", "index.sqlite");
+}
+
+export function createSkwSessionMappingProvider(params: {
+  cfg: OpenClawConfig;
+  agentId: string;
+}): SkwSessionMappingProvider {
+  const agentId = normalizeAgentId(params.agentId);
+  const indexPath = resolveQmdIndexPath(agentId);
+  const reader = createQmdSessionArtifactMappingReader({ indexPath });
+
+  return {
+    resolveSessionScope(scopeParams) {
+      if (normalizeAgentId(scopeParams.agentId) !== agentId) {
+        return null;
+      }
+      const sources = scopeParams.sources ?? ["sessions"];
+      if (!sources.includes("sessions")) {
+        return null;
+      }
+      const mappings = reader.readMappings({ agentId });
+      if (mappings.length === 0) {
+        return null;
+      }
+      return {
+        sessionKey: scopeParams.sessionKey ?? "",
+        sources,
+        mappings: mappings.map((mapping) => ({
+          sourceId: mapping.searchPath,
+          agentId: mapping.agentId,
+          sessionId: mapping.sessionId,
+          memoryKey: mapping.memoryKey,
+          archived: mapping.archived,
+        })),
+      };
+    },
+  };
 }
 
 function resolveQmdManagerRuntimeConfig(

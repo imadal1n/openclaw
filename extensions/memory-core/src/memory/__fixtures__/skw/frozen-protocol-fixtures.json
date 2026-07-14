@@ -1,0 +1,407 @@
+{
+  "version": 1,
+  "profiles": ["host"],
+  "fixtures": [
+    {
+      "name": "search-source-file-line",
+      "request": {
+        "version": 1,
+        "operation": "search",
+        "profile": "host",
+        "request": { "case": "search-source-file-line", "query": "fixture", "maxResults": 1 }
+      },
+      "response": {
+        "ok": true,
+        "results": [
+          {
+            "path": "skw://memory/source-file-line?chunk=source-line&sig=valid-source-line",
+            "startLine": 12,
+            "endLine": 14,
+            "score": 0.97,
+            "snippet": "fixture source line result",
+            "source": "memory",
+            "citation": "MEMORY.md:12-14",
+            "truthTier": "verified",
+            "visibility": "shared"
+          }
+        ]
+      }
+    },
+    {
+      "name": "search-empty-result",
+      "request": {
+        "version": 1,
+        "operation": "search",
+        "profile": "host",
+        "request": { "case": "search-empty-result", "query": "missing", "maxResults": 3 }
+      },
+      "response": { "ok": true, "results": [] }
+    },
+    {
+      "name": "search-shared-visibility",
+      "request": {
+        "version": 1,
+        "operation": "search",
+        "profile": "host",
+        "request": { "case": "search-shared-visibility", "query": "shared" }
+      },
+      "response": {
+        "ok": true,
+        "results": [
+          {
+            "path": "skw://memory/shared?chunk=shared&sig=valid-shared",
+            "startLine": 1,
+            "endLine": 2,
+            "score": 0.9,
+            "snippet": "shared memory",
+            "source": "memory",
+            "truthTier": "observed",
+            "visibility": "shared"
+          }
+        ]
+      }
+    },
+    {
+      "name": "search-private-visibility",
+      "request": {
+        "version": 1,
+        "operation": "search",
+        "profile": "host",
+        "request": { "case": "search-private-visibility", "query": "private" }
+      },
+      "response": {
+        "ok": true,
+        "results": [
+          {
+            "path": "skw://memory/private?chunk=private&sig=valid-private",
+            "startLine": 7,
+            "endLine": 7,
+            "score": 0.88,
+            "snippet": "private memory",
+            "source": "memory",
+            "truthTier": "derived",
+            "visibility": "private"
+          }
+        ]
+      }
+    },
+    {
+      "name": "search-valid-session-identity",
+      "request": {
+        "version": 1,
+        "operation": "search",
+        "profile": "host",
+        "request": { "case": "search-valid-session-identity", "query": "session", "sources": ["sessions"] }
+      },
+      "response": {
+        "ok": true,
+        "results": [
+          {
+            "path": "skw://sessions/current?chunk=session&sig=valid-session",
+            "startLine": 20,
+            "endLine": 24,
+            "score": 0.86,
+            "snippet": "session memory",
+            "source": "sessions",
+            "truthTier": "verified",
+            "visibility": "shared",
+            "sessionArtifact": {
+              "agentId": "fixture-agent",
+              "archived": false,
+              "memoryKey": "fixture-memory-key",
+              "sessionId": "fixture-session-id"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "search-archived-session-identity",
+      "request": {
+        "version": 1,
+        "operation": "search",
+        "profile": "host",
+        "request": { "case": "search-archived-session-identity", "query": "archived", "sources": ["sessions"] }
+      },
+      "response": {
+        "ok": true,
+        "results": [
+          {
+            "path": "skw://sessions/archive?chunk=session&sig=valid-archive",
+            "startLine": 30,
+            "endLine": 35,
+            "score": 0.81,
+            "snippet": "archived session memory",
+            "source": "sessions",
+            "truthTier": "observed",
+            "visibility": "shared",
+            "sessionArtifact": {
+              "agentId": "fixture-agent",
+              "archived": true,
+              "memoryKey": "fixture-archived-memory-key",
+              "sessionId": "fixture-archived-session-id"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "read-signed-skw-path",
+      "request": {
+        "version": 1,
+        "operation": "read",
+        "profile": "host",
+        "request": {
+          "case": "read-signed-skw-path",
+          "path": "skw://memory/source-file-line?chunk=source-line&sig=valid-source-line",
+          "from": 12,
+          "lines": 3
+        }
+      },
+      "response": {
+        "ok": true,
+        "result": {
+          "path": "skw://memory/source-file-line?chunk=source-line&sig=valid-source-line",
+          "text": "fixture source line result\nsecond line\nthird line",
+          "from": 12,
+          "lines": 3,
+          "truncated": false,
+          "nextFrom": null
+        }
+      }
+    },
+    {
+      "name": "status-ready",
+      "request": {
+        "version": 1,
+        "operation": "status",
+        "profile": "host",
+        "request": { "case": "status-ready" }
+      },
+      "response": {
+        "ok": true,
+        "status": {
+          "backend": "skw",
+          "provider": "skw",
+          "model": "text-embedding-3-small",
+          "custom": { "profile": "host", "availability": "ready" }
+        }
+      }
+    },
+    {
+      "name": "probe-embedding-available",
+      "request": {
+        "version": 1,
+        "operation": "probe_embedding",
+        "profile": "host",
+        "request": { "case": "probe-embedding-available" }
+      },
+      "response": { "ok": true, "available": true }
+    },
+    {
+      "name": "probe-vector-available",
+      "request": {
+        "version": 1,
+        "operation": "probe_vector",
+        "profile": "host",
+        "request": { "case": "probe-vector-available" }
+      },
+      "response": { "ok": true, "available": true }
+    },
+    {
+      "name": "failure-invalid-request",
+      "request": { "version": 1, "operation": "search", "profile": "host", "request": { "case": "failure-invalid-request" } },
+      "response": { "ok": false, "error": { "code": "INVALID_REQUEST", "message": "invalid request" } }
+    },
+    {
+      "name": "failure-denied-profile",
+      "request": { "version": 1, "operation": "search", "profile": "host", "request": { "case": "failure-denied-profile" } },
+      "response": { "ok": false, "error": { "code": "DENIED", "message": "profile denied" } }
+    },
+    {
+      "name": "failure-unavailable-command",
+      "request": { "version": 1, "operation": "status", "profile": "host", "request": { "case": "failure-unavailable-command" } },
+      "response": { "ok": false, "error": { "code": "UNAVAILABLE", "message": "adapter unavailable" } }
+    },
+    {
+      "name": "failure-timeout",
+      "request": { "version": 1, "operation": "search", "profile": "host", "request": { "case": "failure-timeout" } },
+      "response": { "ok": false, "error": { "code": "TIMEOUT", "message": "timed out" } }
+    },
+    {
+      "name": "failure-aborted",
+      "request": { "version": 1, "operation": "read", "profile": "host", "request": { "case": "failure-aborted" } },
+      "response": { "ok": false, "error": { "code": "ABORTED", "message": "aborted" } }
+    },
+    {
+      "name": "failure-launch-failed",
+      "request": { "version": 1, "operation": "status", "profile": "host", "request": { "case": "failure-launch-failed" } },
+      "response": { "ok": false, "error": { "code": "LAUNCH_FAILED", "message": "launch failed" } }
+    },
+    {
+      "name": "failure-nonzero-exit",
+      "request": { "version": 1, "operation": "probe_vector", "profile": "host", "request": { "case": "failure-nonzero-exit" } },
+      "response": { "ok": false, "error": { "code": "NONZERO_EXIT", "message": "nonzero exit" } }
+    },
+    {
+      "name": "failure-malformed-output",
+      "request": { "version": 1, "operation": "probe_embedding", "profile": "host", "request": { "case": "failure-malformed-output" } },
+      "response": { "ok": false, "error": { "code": "MALFORMED_OUTPUT", "message": "malformed output" } }
+    },
+    {
+      "name": "failure-output-limit",
+      "request": { "version": 1, "operation": "search", "profile": "host", "request": { "case": "failure-output-limit" } },
+      "response": { "ok": false, "error": { "code": "OUTPUT_LIMIT", "message": "output limit" } }
+    },
+    {
+      "name": "reject-invalid-truth-tier",
+      "request": { "version": 1, "operation": "search", "profile": "host", "request": { "case": "reject-invalid-truth-tier" } },
+      "response": {
+        "ok": true,
+        "results": [
+          {
+            "path": "skw://memory/bad-tier?chunk=bad&sig=valid-bad-tier",
+            "startLine": 1,
+            "endLine": 1,
+            "score": 0.5,
+            "snippet": "bad tier",
+            "source": "memory",
+            "truthTier": "rumor",
+            "visibility": "shared"
+          }
+        ]
+      }
+    },
+    {
+      "name": "reject-unsigned-skw-read-path",
+      "request": { "version": 1, "operation": "read", "profile": "host", "request": { "case": "reject-unsigned-skw-read-path" } },
+      "response": { "ok": true, "result": { "path": "skw://memory/unsigned", "text": "unsigned" } }
+    },
+    {
+      "name": "reject-raw-read-path",
+      "request": { "version": 1, "operation": "read", "profile": "host", "request": { "case": "reject-raw-read-path" } },
+      "response": { "ok": true, "result": { "path": "/srv/skw/raw.md", "text": "raw" } }
+    },
+    {
+      "name": "reject-qmd-read-path",
+      "request": { "version": 1, "operation": "read", "profile": "host", "request": { "case": "reject-qmd-read-path" } },
+      "response": { "ok": true, "result": { "path": "qmd://sessions/fixture", "text": "qmd" } }
+    },
+    {
+      "name": "reject-unknown-profile",
+      "request": { "version": 1, "operation": "search", "profile": "unknown", "request": { "case": "reject-unknown-profile" } },
+      "response": { "ok": true, "results": [] }
+    },
+    {
+      "name": "reject-hidden-proposal",
+      "request": { "version": 1, "operation": "search", "profile": "host", "request": { "case": "reject-hidden-proposal" } },
+      "response": {
+        "ok": true,
+        "results": [
+          {
+            "path": "skw://memory/hidden?chunk=hidden&sig=valid-hidden",
+            "startLine": 4,
+            "endLine": 4,
+            "score": 0.3,
+            "snippet": "hidden proposal",
+            "source": "memory",
+            "truthTier": "derived",
+            "visibility": "hidden_proposal"
+          }
+        ]
+      }
+    },
+    {
+      "name": "reject-malformed-session-identity",
+      "request": { "version": 1, "operation": "search", "profile": "host", "request": { "case": "reject-malformed-session-identity" } },
+      "response": {
+        "ok": true,
+        "results": [
+          {
+            "path": "skw://sessions/malformed?chunk=session&sig=valid-malformed",
+            "startLine": 2,
+            "endLine": 3,
+            "score": 0.6,
+            "snippet": "malformed session",
+            "source": "sessions",
+            "truthTier": "verified",
+            "visibility": "shared",
+            "sessionArtifact": { "agentId": "fixture-agent", "archived": false, "memoryKey": "" }
+          }
+        ]
+      }
+    },
+    {
+      "name": "reject-cross-agent-session-identity",
+      "request": { "version": 1, "operation": "search", "profile": "host", "request": { "case": "reject-cross-agent-session-identity" } },
+      "response": {
+        "ok": true,
+        "results": [
+          {
+            "path": "skw://sessions/cross-agent?chunk=session&sig=valid-cross-agent",
+            "startLine": 2,
+            "endLine": 3,
+            "score": 0.6,
+            "snippet": "cross agent session",
+            "source": "sessions",
+            "truthTier": "verified",
+            "visibility": "shared",
+            "sessionArtifact": {
+              "agentId": "other-agent",
+              "archived": false,
+              "memoryKey": "fixture-memory-key",
+              "sessionId": "fixture-session-id"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "reject-missing-openclaw-fields",
+      "request": { "version": 1, "operation": "search", "profile": "host", "request": { "case": "reject-missing-openclaw-fields" } },
+      "response": {
+        "ok": true,
+        "results": [
+          {
+            "path": "skw://memory/missing?chunk=missing&sig=valid-missing",
+            "startLine": 1,
+            "score": 0.4,
+            "source": "memory",
+            "truthTier": "verified",
+            "visibility": "shared"
+          }
+        ]
+      }
+    },
+    {
+      "name": "process-unavailable-command",
+      "request": { "version": 1, "operation": "status", "profile": "host", "request": { "case": "process-unavailable-command" } },
+      "response": { "ok": false, "error": { "code": "LAUNCH_FAILED", "message": "command not found" } }
+    },
+    {
+      "name": "process-timeout",
+      "request": { "version": 1, "operation": "search", "profile": "host", "request": { "case": "process-timeout" } },
+      "response": { "ok": false, "error": { "code": "TIMEOUT", "message": "timed out" } }
+    },
+    {
+      "name": "process-abort",
+      "request": { "version": 1, "operation": "read", "profile": "host", "request": { "case": "process-abort" } },
+      "response": { "ok": false, "error": { "code": "ABORTED", "message": "aborted" } }
+    },
+    {
+      "name": "process-malformed-json",
+      "request": { "version": 1, "operation": "search", "profile": "host", "request": { "case": "process-malformed-json" } },
+      "response": { "ok": false, "error": { "code": "MALFORMED_OUTPUT", "message": "malformed JSON" } }
+    },
+    {
+      "name": "process-oversized-stdout",
+      "request": { "version": 1, "operation": "search", "profile": "host", "request": { "case": "process-oversized-stdout" } },
+      "response": { "ok": false, "error": { "code": "OUTPUT_LIMIT", "message": "oversized stdout" } }
+    },
+    {
+      "name": "process-nonzero-exit",
+      "request": { "version": 1, "operation": "search", "profile": "host", "request": { "case": "process-nonzero-exit" } },
+      "response": { "ok": false, "error": { "code": "NONZERO_EXIT", "message": "exit 1" } }
+    }
+  ]
+}
