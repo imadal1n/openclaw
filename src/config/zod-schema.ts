@@ -237,6 +237,7 @@ const MemorySkwAdapterSchema = z
     args: z.array(z.string()).optional(),
     cwd: z.string().trim().min(1).optional(),
     timeoutMs: z.number().int().positive().optional(),
+    env: z.record(z.string(), z.string()).optional(),
   })
   .strict();
 

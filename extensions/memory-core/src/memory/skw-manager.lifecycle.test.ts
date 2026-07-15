@@ -51,6 +51,7 @@ describe("SkwMemorySearchManager lifecycle methods", () => {
     });
     expect(frame.params).toEqual({
       eventId: "evt-1",
+      action: "add",
       target: "user",
       content: "hello world",
       metadata: { category: "user_pref" },

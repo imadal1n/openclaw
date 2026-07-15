@@ -6,7 +6,6 @@ import {
   it,
   DEFAULT_TIMEOUT_MS,
   SkwProviderError,
-  SkwProviderProcess,
   cleanup,
   createProvider,
   identity,
@@ -67,6 +66,26 @@ export function registerRealOpsTests(): void {
       if (results[32].status === "rejected") {
         expect(results[32].reason).toBeInstanceOf(SkwProviderError);
         expect(results[32].reason).toMatchObject({ code: "UNAVAILABLE" });
+      }
+    });
+
+    it("uses only the configured env and does not inherit unrelated process.env secrets", async () => {
+      process.env.TEST_ECHO_SECRET = "should-not-leak";
+      const provider = createProvider({
+        env: { TEST_ECHO_VISIBLE: "yes" },
+      });
+      try {
+        const result = await provider.request({
+          op: "env",
+          identity: identity(),
+          params: {},
+          timeoutMs: DEFAULT_TIMEOUT_MS,
+        });
+        expect(result).toEqual({
+          env: { TEST_ECHO_VISIBLE: "yes" },
+        });
+      } finally {
+        delete process.env.TEST_ECHO_SECRET;
       }
     });
 

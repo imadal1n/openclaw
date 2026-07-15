@@ -55,10 +55,6 @@ const MEMORY_PATH = "skw://v1/memory-source";
 
 type ManagerHarness = Awaited<ReturnType<typeof createManagerHarness>>;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function resolvedForProfile(agentId: string, profile: string): ResolvedSkwConfig {
   const resolved = createResolvedSkwConfig({ agentId });
   if (profile === SKW_PROFILE) {
@@ -205,15 +201,18 @@ describe("SkwMemorySearchManager signed read authorization", () => {
     // When: SKW search runs through the provider process.
     const searchFrame = await issueSessionHandle(harness);
 
-    // Then: the provider sees a provider-neutral map with canonical sessionId+sessionKey pairs.
+    // Then: the provider sees the expanded canonical source types.
     expect(searchFrame.params).toMatchObject({
-      sessionScope: {
-        sessionKey: SESSION_A.sessionKey,
-        mappings: [
-          expect.objectContaining({ sessionId: "session-a", sessionKey: SESSION_A.sessionKey }),
-          expect.objectContaining({ sessionId: "session-b", sessionKey: SESSION_B.sessionKey }),
-        ],
-      },
+      query: "session",
+      maxResults: 2,
+      sources: [
+        "daily_journal",
+        "conversation_cleaned",
+        "transcript_matrix",
+        "transcript_shadow",
+        "letter",
+        "dream",
+      ],
     });
 
     const read = harness.manager.readFile({
@@ -228,7 +227,7 @@ describe("SkwMemorySearchManager signed read authorization", () => {
       capabilities: { vector: true },
     });
     await expect(read).resolves.toMatchObject({ path: SESSION_PATH, text: "session text" });
-    expect(readFrame.params).toMatchObject({ relPath: SESSION_PATH });
+    expect(readFrame.params).toMatchObject({ handle: SESSION_PATH });
   });
 
   it("denies forged, archived, expired, cross-session, and missing-identity handles before read", async () => {
@@ -289,5 +288,3 @@ describe("SkwMemorySearchManager signed read authorization", () => {
     expect(spawnMock).toHaveBeenCalledTimes(1);
   });
 });
-
-export {};

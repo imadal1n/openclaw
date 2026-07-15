@@ -86,7 +86,9 @@ export class SkwProviderProcess {
         new Promise<void>((resolve) => {
           this.activeRequest!.onDone = resolve;
         }),
-        new Promise<void>((resolve) => setTimeout(resolve, params.timeoutMs)),
+        new Promise<void>((resolve) => {
+          setTimeout(resolve, params.timeoutMs);
+        }),
       ]);
     }
     if (this.state !== "closing" || !this.child) {

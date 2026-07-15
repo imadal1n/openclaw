@@ -84,6 +84,7 @@ export type ResolvedSkwAdapterConfig = {
   args: string[];
   cwd?: string;
   timeoutMs?: number;
+  env?: Record<string, string>;
 };
 
 export type ResolvedQmdCollection = {

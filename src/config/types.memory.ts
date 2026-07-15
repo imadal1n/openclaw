@@ -19,6 +19,7 @@ export type MemorySkwAdapterConfig = {
   args?: string[];
   cwd?: string;
   timeoutMs?: number;
+  env?: Record<string, string>;
 };
 
 /** Limits declared for one SKW profile; agent policy may only tighten these. */

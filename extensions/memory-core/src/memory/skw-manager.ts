@@ -20,6 +20,7 @@ import { parseSkwPrefetchResult } from "./skw-prefetch.js";
 import { PROTOCOL_VERSION, SkwProviderError } from "./skw-provider-framing.js";
 import { skwProviderPool } from "./skw-provider-pool.js";
 import { SkwProviderProcess, type SkwProviderProcessConfig } from "./skw-provider-process.js";
+import { expandSkwSources, normalizeSkwSourceType } from "./skw-source-mapping.js";
 
 export type SkwSessionScope = {
   sessionKey: string;
@@ -42,7 +43,14 @@ export interface SkwSessionMappingProvider {
   }): SkwSessionScope | null;
 }
 
-type Adapter = { command: string; args: string[]; cwd: string; timeoutMs: number };
+type Adapter = {
+  command: string;
+  args: string[];
+  cwd: string;
+  timeoutMs: number;
+  env: NodeJS.ProcessEnv;
+};
+
 type ProcessKeyParts = {
   agentId: string;
   profile: string;
@@ -95,6 +103,7 @@ function defaultAdapter(resolved: ResolvedSkwConfig): Adapter {
     args: resolved.adapter?.args ?? [],
     cwd: resolved.adapter?.cwd ?? "/tmp/workspace",
     timeoutMs: resolved.adapter?.timeoutMs ?? 30_000,
+    env: resolved.adapter?.env ?? {},
   };
 }
 
@@ -149,7 +158,7 @@ function buildProcessConfig(resolved: ResolvedSkwConfig): SkwProviderProcessConf
     command: adapter.command,
     args: adapter.args,
     cwd: adapter.cwd,
-    env: {},
+    env: adapter.env,
     logger: { warn: (message) => console.warn(message) },
   };
 }
@@ -244,9 +253,13 @@ function signedHandlesFromResult(result: SkwSearchResult): string[] {
 }
 
 function parseSearchResults(value: unknown): SkwSearchResult[] {
-  return isRecord(value) && Array.isArray(value.results)
-    ? value.results.filter(isSearchResult)
-    : [];
+  if (!isRecord(value) || !Array.isArray(value.results)) {
+    return [];
+  }
+  return value.results.filter(isSearchResult).map((result) => {
+    result.source = normalizeSkwSourceType(result.source);
+    return result;
+  });
 }
 
 function parseReadResult(value: unknown): MemoryReadResult {
@@ -324,6 +337,9 @@ export class SkwMemorySearchManager implements MemorySearchManager {
         sessionKey: opts?.sessionKey,
         sources: opts?.sources,
       }) ?? undefined;
+    const sessionIdentity = sessionScope?.mappings.find(
+      (candidate) => candidate.sessionKey === opts?.sessionKey,
+    );
     const result = await this.requestWithProcess(
       process,
       "search",
@@ -331,11 +347,15 @@ export class SkwMemorySearchManager implements MemorySearchManager {
         query,
         maxResults: opts?.maxResults,
         minScore: opts?.minScore,
-        sessionKey: opts?.sessionKey,
-        sessionScope,
-        sources: opts?.sources,
+        sources: expandSkwSources(opts?.sources),
       },
       opts?.signal,
+      {
+        agentId: this.params.agentId,
+        profile: this.keyParts.profile,
+        sessionId: sessionIdentity?.sessionId,
+        sessionKey: sessionIdentity?.sessionKey,
+      },
     );
     await this.refreshStatusAfterOperation();
     const results = parseSearchResults(result);
@@ -384,6 +404,7 @@ export class SkwMemorySearchManager implements MemorySearchManager {
       "memoryWrite",
       {
         eventId: params.eventId,
+        action: "add",
         target: params.target,
         content: params.content,
         metadata: params.metadata,
@@ -462,16 +483,37 @@ export class SkwMemorySearchManager implements MemorySearchManager {
     sessionKey?: string;
   }): Promise<MemoryReadResult> {
     const process = this.authorizeReadProcess(params);
+    const sessionIdentity = this.resolveSessionIdentity(params.sessionKey);
     const readParams = {
-      relPath: params.relPath,
+      handle: params.relPath,
       from: params.from,
       lines: params.lines,
     };
     const result = await (process
-      ? this.requestWithProcess(process, "read", readParams)
+      ? this.requestWithProcess(process, "read", readParams, undefined, {
+          agentId: this.params.agentId,
+          profile: this.keyParts.profile,
+          sessionId: sessionIdentity?.sessionId,
+          sessionKey: sessionIdentity?.sessionKey,
+        })
       : this.request("read", readParams));
     await this.refreshStatusAfterOperation();
     return parseReadResult(result);
+  }
+
+  private resolveSessionIdentity(sessionKey?: string): {
+    sessionId?: string;
+    sessionKey?: string;
+  } {
+    if (!sessionKey) {
+      return {};
+    }
+    const scope = this.params.sessionMappingProvider?.resolveSessionScope({
+      agentId: this.params.agentId,
+      sessionKey,
+      sources: ["sessions"],
+    });
+    return scope?.mappings.find((m) => m.sessionKey === sessionKey) ?? {};
   }
 
   async probeEmbeddingAvailability(): Promise<MemoryEmbeddingProbeResult> {
@@ -503,16 +545,34 @@ export class SkwMemorySearchManager implements MemorySearchManager {
 
   private async initialize(): Promise<void> {
     const definition = profileDefinition(this.params.resolved, this.keyParts.profile);
-    const initParams = {
+    const limits = definition?.limits;
+    const initParams: Record<string, unknown> = {
       protocolVersion: PROTOCOL_VERSION,
       profile: this.keyParts.profile,
       databasePath: definition?.databasePath,
       memoryDatabasePath: definition?.memoryDatabasePath,
       sessionMapPath: definition?.sessionMapPath,
-      cachePath: definition?.cachePath,
       allowedCollections: definition?.allowedCollections,
       allowedSourceRoots: definition?.allowedSourceRoots,
-      limits: definition?.limits,
+      recallMode: limits?.recallMode,
+      topK: limits?.topK,
+      writable: limits?.writable,
+      autoExtract: limits?.autoExtract,
+      extractor: limits?.extractor,
+      maxWriteCharacters: limits?.maxWriteCharacters,
+      defaultTrust: limits?.defaultTrust,
+      minTrust: limits?.minTrust,
+      temporalDecayHalfLife: limits?.temporalDecayHalfLife,
+      rerankerModel: limits?.rerankerModel,
+      rerankerCacheDir: limits?.rerankerCacheDir,
+      prefetch: {
+        maxInjectedCharacters: limits?.maxInjectedCharacters,
+        maxInjectedTokens: limits?.maxInjectedTokens,
+        minTurnsBetweenAttempts: limits?.minTurnsBetweenAttempts,
+        candidatePoolSize: limits?.candidatePoolSize,
+        rerankThreshold: limits?.rerankThreshold,
+        maxChunksPerSource: limits?.maxChunksPerSource,
+      },
     };
     const { process, status } = await skwProviderPool.acquire(
       this.key,

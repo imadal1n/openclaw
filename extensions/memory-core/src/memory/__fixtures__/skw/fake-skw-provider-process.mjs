@@ -158,5 +158,19 @@ function handleFrame(frame) {
     return;
   }
 
+  if (op === "env") {
+    send({
+      version: 1,
+      id,
+      ok: true,
+      result: {
+        env: Object.fromEntries(
+          Object.entries(process.env).filter(([key]) => key.startsWith("TEST_ECHO_")),
+        ),
+      },
+    });
+    return;
+  }
+
   send({ version: 1, id, ok: true, result: { op, received: frame.params } });
 }

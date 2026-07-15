@@ -98,6 +98,10 @@ export function processFrame(process: SkwProviderProcess, frame: Buffer): void {
   try {
     response = validateWireResponse(parsed);
   } catch (err) {
+    const diagnostic = err instanceof SkwProviderError ? err.message : String(err);
+    process.config.logger.warn(
+      `SKW response validation failed: ${diagnostic}; raw: ${text.slice(0, 1024)}`,
+    );
     process.invalidate(err as SkwProviderError, false);
     return;
   }
@@ -109,7 +113,9 @@ export function processFrame(process: SkwProviderProcess, frame: Buffer): void {
     return;
   }
   if (response.id !== process.activeRequest.id) {
-    process.invalidate(new SkwProviderError("MALFORMED_OUTPUT", "response id mismatch"), false);
+    const message = `response id mismatch: expected ${process.activeRequest.id}, received ${response.id}; op=${process.activeRequest.op}; raw: ${text.slice(0, 1024)}`;
+    process.config.logger.warn?.(message);
+    process.invalidate(new SkwProviderError("MALFORMED_OUTPUT", message), false);
     return;
   }
   const active = process.activeRequest;
