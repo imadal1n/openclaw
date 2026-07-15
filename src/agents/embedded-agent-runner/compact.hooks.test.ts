@@ -1,6 +1,11 @@
 // Hook integration coverage for direct and queued embedded compaction.
 import type { AgentMessage } from "openclaw/plugin-sdk/agent-core";
-import { beforeAll, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import type {
+  FinishCompactionParams,
+  PrepareCompactionParams,
+  PrepareCompactionResult,
+} from "openclaw/plugin-sdk/memory-core-host-engine-storage";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import {
   applyExtraParamsToAgentMock,
   applyAgentCompactionSettingsFromConfigMock,
@@ -74,6 +79,23 @@ function createDeferred<T>(): Deferred<T> {
     throw new Error("Expected compaction deferred resolver to be initialized");
   }
   return { promise, resolve };
+}
+
+function createControlledPromise<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (error: unknown) => void;
+} {
+  let resolve: ((value: T) => void) | undefined;
+  let reject: ((error: unknown) => void) | undefined;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  if (!resolve || !reject) {
+    throw new Error("Expected controlled promise resolvers to be initialized");
+  }
+  return { promise, resolve, reject };
 }
 
 function expectRecordFields(record: unknown, expected: Record<string, unknown>) {
@@ -180,6 +202,27 @@ async function runCompactionHooks(params: { sessionKey?: string; messageProvider
     tokensBefore: 120,
     firstKeptEntryId: "entry-1",
   });
+}
+
+function createSkwCompactionManager(
+  overrides: {
+    prepareCompaction?:
+      | Mock<(params: PrepareCompactionParams) => Promise<PrepareCompactionResult | void>>
+      | false;
+    finishCompaction?: Mock<(params: FinishCompactionParams) => Promise<void>> | false;
+  } = {},
+) {
+  return {
+    manager: {
+      sync: vi.fn(async () => {}),
+      ...(overrides.prepareCompaction !== false && {
+        prepareCompaction: overrides.prepareCompaction ?? vi.fn(async () => {}),
+      }),
+      ...(overrides.finishCompaction !== false && {
+        finishCompaction: overrides.finishCompaction ?? vi.fn(async () => {}),
+      }),
+    },
+  };
 }
 
 beforeAll(async () => {
@@ -2543,5 +2586,344 @@ describe("compactEmbeddedAgentSession hooks (ownsCompaction engine)", () => {
     expect(result.ok).toBe(true);
     expect(result.compacted).toBe(true);
     expect(contextEngineCompactMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("SKW compaction lifecycle protocol", () => {
+  beforeEach(() => {
+    resetCompactSessionStateMocks();
+    hookRunner.hasHooks.mockReturnValue(false);
+  });
+
+  const lifecycleArgs = () => wrappedCompactionArgs({ config: resolveMemorySearchConfigMock() });
+
+  it("prepares compaction with compactionId, messages, and maxCharacters", async () => {
+    const prepareCompaction = vi.fn<
+      (params: PrepareCompactionParams) => Promise<PrepareCompactionResult | void>
+    >(async () => {});
+    const finishCompaction = vi.fn<(params: FinishCompactionParams) => Promise<void>>(
+      async () => {},
+    );
+    getMemorySearchManagerMock.mockResolvedValue(
+      createSkwCompactionManager({ prepareCompaction, finishCompaction }),
+    );
+
+    await compactEmbeddedAgentSessionDirect(lifecycleArgs());
+
+    expect(prepareCompaction).toHaveBeenCalledTimes(1);
+    const prepareCall = prepareCompaction.mock.calls[0][0];
+    expect(prepareCall.sessionId).toBe(TEST_SESSION_ID);
+    expect(prepareCall.sessionKey).toBe(TEST_SESSION_KEY);
+    expect(prepareCall.compactionId).toBeTypeOf("string");
+    expect(prepareCall.compactionId).toHaveLength(36);
+    expect(prepareCall.messages).toEqual([
+      { role: "user", text: "hello" },
+      { role: "assistant", text: "hi" },
+    ]);
+    expect(prepareCall.maxCharacters).toBe(8192);
+    expect(prepareCall.eventId).toBeUndefined();
+  });
+
+  it("finishes compaction with success, matching compactionId, and compactedCount", async () => {
+    const prepareCompaction = vi.fn<
+      (params: PrepareCompactionParams) => Promise<PrepareCompactionResult | void>
+    >(async () => {});
+    const finishCompaction = vi.fn<(params: FinishCompactionParams) => Promise<void>>(
+      async () => {},
+    );
+    getMemorySearchManagerMock.mockResolvedValue(
+      createSkwCompactionManager({ prepareCompaction, finishCompaction }),
+    );
+
+    const result = await compactEmbeddedAgentSessionDirect(lifecycleArgs());
+
+    expect(result.ok).toBe(true);
+    expect(finishCompaction).toHaveBeenCalledTimes(1);
+    const finishCall = finishCompaction.mock.calls[0][0];
+    expect(finishCall.outcome).toBe("success");
+    expect(finishCall.compactedCount).toBeGreaterThanOrEqual(0);
+    expect(finishCall.compactionId).toBe(prepareCompaction.mock.calls[0][0].compactionId);
+    expect(finishCall.eventId).toBeUndefined();
+  });
+
+  it("finishes compaction with failed outcome and no compactedCount when compaction throws", async () => {
+    const prepareCompaction = vi.fn<
+      (params: PrepareCompactionParams) => Promise<PrepareCompactionResult | void>
+    >(async () => {});
+    const finishCompaction = vi.fn<(params: FinishCompactionParams) => Promise<void>>(
+      async () => {},
+    );
+    getMemorySearchManagerMock.mockResolvedValue(
+      createSkwCompactionManager({ prepareCompaction, finishCompaction }),
+    );
+    sessionCompactImpl.mockRejectedValue(new Error("compact failed"));
+
+    const result = await compactEmbeddedAgentSessionDirect(lifecycleArgs());
+
+    expect(result.ok).toBe(false);
+    expect(finishCompaction).toHaveBeenCalledTimes(1);
+    const finishCall = finishCompaction.mock.calls[0][0];
+    expect(finishCall.outcome).toBe("failed");
+    expect(finishCall.compactedCount).toBeUndefined();
+    expect(finishCall.compactionId).toBe(prepareCompaction.mock.calls[0][0].compactionId);
+  });
+
+  it("swallows finishCompaction errors and still returns the compaction result", async () => {
+    const prepareCompaction = vi.fn<
+      (params: PrepareCompactionParams) => Promise<PrepareCompactionResult | void>
+    >(async () => {});
+    const finishCompaction = vi.fn(async () => {
+      throw new Error("finish failed");
+    });
+    getMemorySearchManagerMock.mockResolvedValue(
+      createSkwCompactionManager({ prepareCompaction, finishCompaction }),
+    );
+
+    const result = await compactEmbeddedAgentSessionDirect(lifecycleArgs());
+
+    expect(result.ok).toBe(true);
+    expect(finishCompaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("merges preservation context returned by prepareCompaction into compaction instructions", async () => {
+    const preservationContext = "SKW: preserve this decision";
+    const prepareCompaction = vi.fn<
+      (params: PrepareCompactionParams) => Promise<PrepareCompactionResult | void>
+    >(async () => ({ preservationContext }));
+    const finishCompaction = vi.fn<(params: FinishCompactionParams) => Promise<void>>(
+      async () => {},
+    );
+    getMemorySearchManagerMock.mockResolvedValue(
+      createSkwCompactionManager({ prepareCompaction, finishCompaction }),
+    );
+
+    await compactEmbeddedAgentSessionDirect(lifecycleArgs());
+
+    const compactCall = sessionCompactImpl.mock.calls[0][0];
+    expect(typeof compactCall).toBe("string");
+    expect(compactCall).toBe(`${TEST_CUSTOM_INSTRUCTIONS}\n\n${preservationContext}`);
+  });
+
+  it("keeps original instructions unchanged when there is no preservation context", async () => {
+    const prepareCompaction = vi.fn<
+      (params: PrepareCompactionParams) => Promise<PrepareCompactionResult | void>
+    >(async () => {});
+    const finishCompaction = vi.fn<(params: FinishCompactionParams) => Promise<void>>(
+      async () => {},
+    );
+    getMemorySearchManagerMock.mockResolvedValue(
+      createSkwCompactionManager({ prepareCompaction, finishCompaction }),
+    );
+    const imageOnlyMessage = {
+      role: "user",
+      content: [{ type: "image" }],
+      timestamp: 1,
+    };
+    sessionMessages.splice(0, sessionMessages.length, imageOnlyMessage);
+
+    await compactEmbeddedAgentSessionDirect(lifecycleArgs());
+
+    const compactCall = sessionCompactImpl.mock.calls[0][0];
+    expect(compactCall).toBe(TEST_CUSTOM_INSTRUCTIONS);
+  });
+
+  it("does not start lifecycle when manager lacks both prepare and finish", async () => {
+    getMemorySearchManagerMock.mockResolvedValue({
+      manager: { sync: vi.fn(async () => {}) },
+    });
+
+    const result = await compactEmbeddedAgentSessionDirect(lifecycleArgs());
+
+    expect(result.ok).toBe(true);
+    expect(result.compacted).toBe(true);
+  });
+
+  it("does not start lifecycle when manager has only one of prepare or finish", async () => {
+    const prepareCompaction = vi.fn<
+      (params: PrepareCompactionParams) => Promise<PrepareCompactionResult | void>
+    >(async () => {});
+    const finishCompaction = vi.fn<(params: FinishCompactionParams) => Promise<void>>(
+      async () => {},
+    );
+    getMemorySearchManagerMock.mockResolvedValue(
+      createSkwCompactionManager({ prepareCompaction, finishCompaction: false }),
+    );
+
+    await compactEmbeddedAgentSessionDirect(lifecycleArgs());
+
+    expect(prepareCompaction).not.toHaveBeenCalled();
+    expect(finishCompaction).not.toHaveBeenCalled();
+
+    getMemorySearchManagerMock.mockResolvedValue(
+      createSkwCompactionManager({ prepareCompaction: false, finishCompaction }),
+    );
+
+    await compactEmbeddedAgentSessionDirect(lifecycleArgs());
+
+    expect(prepareCompaction).not.toHaveBeenCalled();
+    expect(finishCompaction).not.toHaveBeenCalled();
+  });
+
+  it("does not call finish when prepare fails", async () => {
+    const prepareCompaction = vi.fn<
+      (params: PrepareCompactionParams) => Promise<PrepareCompactionResult | void>
+    >(async () => {
+      throw new Error("prepare failed");
+    });
+    const finishCompaction = vi.fn<(params: FinishCompactionParams) => Promise<void>>(
+      async () => {},
+    );
+    getMemorySearchManagerMock.mockResolvedValue(
+      createSkwCompactionManager({ prepareCompaction, finishCompaction }),
+    );
+
+    await compactEmbeddedAgentSessionDirect(lifecycleArgs());
+
+    expect(prepareCompaction).toHaveBeenCalledTimes(1);
+    expect(finishCompaction).not.toHaveBeenCalled();
+    const compactCall = sessionCompactImpl.mock.calls[0][0];
+    expect(compactCall).toBe(TEST_CUSTOM_INSTRUCTIONS);
+  });
+
+  it("does not add leading blank when custom instructions are empty and preservation context is present", async () => {
+    const preservationContext = "SKW: preserve this";
+    const prepareCompaction = vi.fn<
+      (params: PrepareCompactionParams) => Promise<PrepareCompactionResult | void>
+    >(async () => ({ preservationContext }));
+    const finishCompaction = vi.fn<(params: FinishCompactionParams) => Promise<void>>(
+      async () => {},
+    );
+    getMemorySearchManagerMock.mockResolvedValue(
+      createSkwCompactionManager({ prepareCompaction, finishCompaction }),
+    );
+
+    await compactEmbeddedAgentSessionDirect(
+      wrappedCompactionArgs({
+        config: resolveMemorySearchConfigMock(),
+        customInstructions: undefined,
+      }),
+    );
+
+    const compactCall = sessionCompactImpl.mock.calls[0][0];
+    expect(compactCall).toBe(preservationContext);
+  });
+
+  describe("SKW prepareCompaction timeout", () => {
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    const prepareArgs = (manager: {
+      prepareCompaction: Mock<() => Promise<PrepareCompactionResult | void>>;
+      finishCompaction: Mock<() => Promise<void>>;
+    }) => ({
+      skwMemoryManager: manager,
+      params: {
+        sessionId: TEST_SESSION_ID,
+        sessionKey: TEST_SESSION_KEY,
+        compactionId: "test-compaction-id",
+        messages: [
+          { role: "user", text: "hello" },
+          { role: "assistant", text: "hi" },
+        ],
+        maxCharacters: 8192,
+      },
+    });
+
+    function createSkwManagerForTimeout() {
+      return {
+        prepareCompaction: vi.fn<() => Promise<PrepareCompactionResult | void>>(),
+        finishCompaction: vi.fn<() => Promise<void>>(async () => {}),
+      };
+    }
+
+    it("does not settle before the 30s timeout", async () => {
+      const controlled = createControlledPromise<PrepareCompactionResult | void>();
+      const manager = createSkwManagerForTimeout();
+      manager.prepareCompaction.mockReturnValue(controlled.promise);
+
+      const { skwMemoryManager, params } = prepareArgs(manager);
+      const preparePromise = compactTesting.runSkwCompactionPrepare(skwMemoryManager, params);
+
+      await vi.advanceTimersByTimeAsync(29_999);
+
+      expect(manager.prepareCompaction).toHaveBeenCalledTimes(1);
+      const isSettled = await Promise.race([
+        preparePromise.then(() => true),
+        Promise.resolve(false),
+      ]);
+      expect(isSettled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(1);
+      await preparePromise;
+    });
+
+    it("returns undefined and swallows the timeout error when prepareCompaction exceeds 30s", async () => {
+      const controlled = createControlledPromise<PrepareCompactionResult | void>();
+      const manager = createSkwManagerForTimeout();
+      manager.prepareCompaction.mockReturnValue(controlled.promise);
+
+      const { skwMemoryManager, params } = prepareArgs(manager);
+      const preparePromise = compactTesting.runSkwCompactionPrepare(skwMemoryManager, params);
+      await vi.advanceTimersByTimeAsync(30_000);
+      const result = await preparePromise;
+
+      expect(result).toBeUndefined();
+      expect(manager.prepareCompaction).toHaveBeenCalledTimes(1);
+      expect(manager.finishCompaction).not.toHaveBeenCalled();
+    });
+
+    it("ignores a late prepareCompaction resolve", async () => {
+      const controlled = createControlledPromise<PrepareCompactionResult | void>();
+      const manager = createSkwManagerForTimeout();
+      manager.prepareCompaction.mockReturnValue(controlled.promise);
+
+      const { skwMemoryManager, params } = prepareArgs(manager);
+      const preparePromise = compactTesting.runSkwCompactionPrepare(skwMemoryManager, params);
+      await vi.advanceTimersByTimeAsync(30_000);
+      const result = await preparePromise;
+
+      expect(result).toBeUndefined();
+
+      controlled.resolve({ preservationContext: "late context" });
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+
+      expect(result).toBeUndefined();
+      expect(manager.finishCompaction).not.toHaveBeenCalled();
+    });
+
+    it("does not emit an unhandled rejection when prepareCompaction rejects after timeout", async () => {
+      const controlled = createControlledPromise<PrepareCompactionResult | void>();
+      const manager = createSkwManagerForTimeout();
+      manager.prepareCompaction.mockReturnValue(controlled.promise);
+
+      const unhandledRejections: Array<{ reason: unknown }> = [];
+      const onUnhandledRejection = (reason: unknown) => {
+        unhandledRejections.push({ reason });
+      };
+      process.on("unhandledRejection", onUnhandledRejection);
+
+      try {
+        const { skwMemoryManager, params } = prepareArgs(manager);
+        const preparePromise = compactTesting.runSkwCompactionPrepare(skwMemoryManager, params);
+        await vi.advanceTimersByTimeAsync(30_000);
+        const result = await preparePromise;
+
+        expect(result).toBeUndefined();
+
+        controlled.reject(new Error("late prepare failure"));
+        await vi.advanceTimersByTimeAsync(0);
+        await Promise.resolve();
+
+        expect(unhandledRejections).toHaveLength(0);
+      } finally {
+        process.off("unhandledRejection", onUnhandledRejection);
+      }
+    });
   });
 });

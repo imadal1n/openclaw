@@ -115,9 +115,13 @@ export type MemoryEmbeddingProbeResult = {
 };
 
 export type {
+  AgentEndParams,
+  EndSessionParams,
+  FinishCompactionParams,
   MemoryChunk,
   MemoryFileEntry,
   MemoryLifecycleContext,
+  MemoryMessage,
   MemoryPrefetchQuality,
   MemoryPrefetchResult,
   MemoryProviderStatus,
@@ -127,6 +131,9 @@ export type {
   MemorySessionSyncTarget,
   MemorySyncParams,
   MemorySyncProgressUpdate,
+  MemoryWriteParams,
+  PrepareCompactionParams,
+  PrepareCompactionResult,
   ResolvedMemoryBackendConfig,
   ResolvedQmdConfig,
   ResolvedQmdMcporterConfig,

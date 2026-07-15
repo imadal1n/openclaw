@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 // Memory Core plugin entrypoint registers its OpenClaw integration.
 import {
   jsonResult,
@@ -19,6 +20,12 @@ import { registerShortTermPromotionDreaming } from "./src/dreaming.js";
 import { buildMemoryFlushPlan } from "./src/flush-plan.js";
 import { buildPromptSection } from "./src/prompt-section.js";
 import { getMemoryRuntimeCapabilities, getMemoryRuntimeStatus } from "./src/runtime-provider.js";
+import {
+  handleSkwAfterCompaction,
+  handleSkwAgentEnd,
+  handleSkwBeforeCompaction,
+  handleSkwSessionEnd,
+} from "./src/skw-lifecycle-hooks.js";
 import { registerSkwPrefetchHook } from "./src/skw-prefetch-hook.js";
 
 type MemoryToolsModule = typeof import("./src/tools.js");
@@ -207,6 +214,67 @@ export default definePluginEntry({
           return await listMemoryCorePublicArtifacts(params);
         },
       },
+    });
+
+    const getConfig = () =>
+      (api.runtime.config?.current?.() as OpenClawConfig | undefined) ?? api.config;
+
+    const skwCompactionIds = new Map<string, string>();
+
+    api.on("agent_end", async (event, ctx) => {
+      await handleSkwAgentEnd({
+        event,
+        ctx,
+        runtime: memoryRuntime,
+        getConfig,
+        log: (message) => api.logger.info(message),
+      });
+    });
+
+    api.on("session_end", async (event, ctx) => {
+      await handleSkwSessionEnd({
+        event,
+        ctx,
+        runtime: memoryRuntime,
+        getConfig,
+        log: (message) => api.logger.info(message),
+      });
+    });
+
+    api.on("before_compaction", async (event, ctx) => {
+      const sessionId = ctx.sessionId ?? "unknown";
+      const compactionId = randomUUID();
+      skwCompactionIds.set(sessionId, compactionId);
+      await handleSkwBeforeCompaction({
+        event,
+        ctx,
+        runtime: memoryRuntime,
+        getConfig,
+        compactionId,
+        log: (message) => api.logger.info(message),
+      });
+    });
+
+    api.on("after_compaction", async (event, ctx) => {
+      const sessionId = ctx.sessionId ?? "unknown";
+      const compactionId = skwCompactionIds.get(sessionId);
+      if (!compactionId) {
+        api.logger.info(
+          "skw-lifecycle: after_compaction skipped, no correlated before_compaction compactionId",
+        );
+        return;
+      }
+      skwCompactionIds.delete(sessionId);
+      await handleSkwAfterCompaction({
+        event,
+        ctx,
+        runtime: memoryRuntime,
+        getConfig,
+        compactionId,
+        outcome: "success",
+        compactedCount: event.compactedCount,
+        log: (message) => api.logger.info(message),
+      });
     });
 
     registerSkwPrefetchHook({ api, runtime: memoryRuntime });

@@ -32,8 +32,12 @@ export type {
   ResolvedSkwConfig,
 } from "./host/backend-config.js";
 export type {
+  AgentEndParams,
+  EndSessionParams,
+  FinishCompactionParams,
   MemoryEmbeddingProbeResult,
   MemoryLifecycleContext,
+  MemoryMessage,
   MemoryPrefetchQuality,
   MemoryPrefetchResult,
   MemoryProviderStatus,
@@ -44,6 +48,9 @@ export type {
   MemorySource,
   MemorySyncParams,
   MemorySyncProgressUpdate,
+  MemoryWriteParams,
+  PrepareCompactionParams,
+  PrepareCompactionResult,
 } from "./host/types.js";
 export {
   ensureMemoryIndexSchema,

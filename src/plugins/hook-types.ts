@@ -420,6 +420,7 @@ export type PluginHookBeforeCompactionEvent = {
   tokenCount?: number;
   messages?: unknown[];
   sessionFile?: string;
+  maxCharacters?: number;
 };
 
 export type PluginHookBeforeResetEvent = {

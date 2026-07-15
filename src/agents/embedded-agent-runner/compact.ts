@@ -1,6 +1,7 @@
 /**
  * Implements embedded-agent transcript compaction and runtime handoff.
  */
+import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import { isAcpRuntimeSpawnAvailable } from "../../acp/runtime/availability.js";
@@ -23,9 +24,15 @@ import {
 import { formatErrorMessage } from "../../infra/errors.js";
 import { getMachineDisplayName } from "../../infra/machine-name.js";
 import { generateSecureToken } from "../../infra/secure-random.js";
+import type {
+  FinishCompactionParams,
+  PrepareCompactionParams,
+  PrepareCompactionResult,
+} from "../../plugin-sdk/memory-core-host-engine-storage.js";
 import { listRegisteredPluginAgentPromptGuidance } from "../../plugins/command-registry-state.js";
 import { getCurrentPluginMetadataSnapshot } from "../../plugins/current-plugin-metadata-snapshot.js";
 import { getGlobalHookRunner } from "../../plugins/hook-runner-global.js";
+import { getActiveMemorySearchManager } from "../../plugins/memory-runtime.js";
 import { extractModelCompat } from "../../plugins/provider-model-compat.js";
 import type { ProviderRuntimeModel } from "../../plugins/provider-runtime-model.types.js";
 import {
@@ -47,6 +54,7 @@ import {
 import { resolveUserPath } from "../../utils.js";
 import { normalizeMessageChannel } from "../../utils/message-channel.js";
 import { isReasoningTagProvider } from "../../utils/provider-utils.js";
+import { withTimeout } from "../../utils/with-timeout.js";
 import { createBundleLspToolRuntime } from "../agent-bundle-lsp-runtime.js";
 import { createBundleMcpToolRuntime } from "../agent-bundle-mcp-tools.js";
 import {
@@ -123,7 +131,12 @@ import {
   resolveSessionLockMaxHoldFromTimeout,
   resolveSessionWriteLockOptions,
 } from "../session-write-lock.js";
-import { createAgentSession, estimateTokens, SessionManager } from "../sessions/index.js";
+import {
+  createAgentSession,
+  estimateTokens,
+  SessionManager,
+  type CompactionResult,
+} from "../sessions/index.js";
 import { detectRuntimeShell } from "../shell-utils.js";
 import {
   filterProviderNormalizableTools,
@@ -179,6 +192,10 @@ import {
 } from "./sandbox-skills.js";
 import { prewarmSessionFile, trackSessionManagerAccess } from "./session-manager-cache.js";
 import {
+  mergeCompactionInstructions,
+  normalizeMessagesToMemoryMessages,
+} from "./skw-compaction-instructions.js";
+import {
   resolveEmbeddedAgentBaseStreamFn,
   resolveEmbeddedAgentStreamFn,
 } from "./stream-resolution.js";
@@ -195,6 +212,8 @@ import { mapThinkingLevel, normalizeContextTokenBudget } from "./utils.js";
 import { flushPendingToolResultsAfterIdle } from "./wait-for-idle-before-flush.js";
 export type { CompactEmbeddedAgentSessionParams } from "./compact.types.js";
 
+const SKW_PREPARE_COMPACTION_TIMEOUT_MS = 30_000;
+
 const compactionCheckpointStore = createFileBackedCompactionCheckpointStore();
 type CompactEmbeddedAgentSessionParamsWithSessionFile = CompactEmbeddedAgentSessionRuntimeParams & {
   sessionFile: string;
@@ -210,6 +229,47 @@ function hasRealConversationContent(
 
 function createCompactionDiagId(): string {
   return `cmp-${Date.now().toString(36)}-${generateSecureToken(4)}`;
+}
+
+type SkwCompactionManager = {
+  prepareCompaction: (params: PrepareCompactionParams) => Promise<PrepareCompactionResult | void>;
+  finishCompaction: (params: FinishCompactionParams) => Promise<void>;
+};
+
+async function runSkwCompactionPrepare(
+  skwMemoryManager: SkwCompactionManager,
+  params: {
+    sessionId: string;
+    sessionKey: string;
+    compactionId: string;
+    messages: ReturnType<typeof normalizeMessagesToMemoryMessages>;
+    maxCharacters: number;
+  },
+): Promise<{ preservationContext?: string } | undefined> {
+  try {
+    const preparePromise = skwMemoryManager.prepareCompaction({
+      sessionId: params.sessionId,
+      sessionKey: params.sessionKey,
+      compactionId: params.compactionId,
+      messages: params.messages,
+      maxCharacters: params.maxCharacters,
+    });
+    // Suppress late unhandled rejections from the underlying promise if
+    // the timeout fires first; the race has already settled, so any
+    // later settlement must be ignored.
+    preparePromise.catch(() => {});
+    const prepareResult = await withTimeout(
+      preparePromise,
+      SKW_PREPARE_COMPACTION_TIMEOUT_MS,
+      "prepareCompaction",
+    );
+    return { preservationContext: prepareResult?.preservationContext };
+  } catch (err) {
+    log.warn("skw compaction: prepareCompaction failed", {
+      errorMessage: formatErrorMessage(err),
+    });
+    return undefined;
+  }
 }
 
 function prepareCompactionSessionAgent(params: {
@@ -1429,6 +1489,50 @@ async function compactEmbeddedAgentSessionDirectOnce(
             metrics: beforeHookMetrics,
             onHookMessages: params.onCompactionHookMessages,
           });
+
+          let skwCompactionId: string | undefined;
+          let skwCompactionOutcome: "success" | "failed" = "failed";
+          let skwCompactionCompactedCount: number | undefined;
+          let skwCompactionTransactionStarted = false;
+          let skwCompactionPreservationContext: string | undefined;
+          let skwMemoryManager:
+            | Awaited<ReturnType<typeof getActiveMemorySearchManager>>["manager"]
+            | null = null;
+          if (params.config) {
+            try {
+              const activeManagerResult = await getActiveMemorySearchManager({
+                cfg: params.config,
+                agentId: sessionAgentId,
+              });
+              skwMemoryManager = activeManagerResult.manager;
+            } catch (err) {
+              log.warn("skw compaction: failed to resolve memory manager", {
+                errorMessage: formatErrorMessage(err),
+              });
+            }
+          }
+          if (skwMemoryManager?.prepareCompaction && skwMemoryManager?.finishCompaction) {
+            skwCompactionId = randomUUID();
+            const prepareResult = await runSkwCompactionPrepare(
+              skwMemoryManager as SkwCompactionManager,
+              {
+                sessionId: params.sessionId,
+                sessionKey: hookSessionKey,
+                compactionId: skwCompactionId,
+                messages: normalizeMessagesToMemoryMessages(session.messages),
+                maxCharacters: 8192,
+              },
+            );
+            if (prepareResult) {
+              skwCompactionPreservationContext = prepareResult.preservationContext;
+              skwCompactionTransactionStarted = true;
+            }
+          }
+
+          const mergedInstructions = mergeCompactionInstructions(
+            params.customInstructions,
+            skwCompactionPreservationContext,
+          );
           const { messageCountOriginal } = beforeHookMetrics;
           const diagEnabled = log.isEnabled("debug");
           const preMetrics = diagEnabled
@@ -1474,19 +1578,48 @@ async function compactEmbeddedAgentSessionDirectOnce(
             // the sanity check below becomes a no-op instead of crashing compaction.
           }
           const activeSession = session;
-          const result = await compactWithSafetyTimeout(
-            () => {
-              setCompactionSafeguardCancelReason(compactionSessionManager, undefined);
-              return activeSession.compact(params.customInstructions);
-            },
-            compactionTimeoutMs,
-            {
-              abortSignal: params.abortSignal,
-              onCancel: () => {
-                activeSession.abortCompaction();
+          let result: CompactionResult;
+          try {
+            result = await compactWithSafetyTimeout(
+              () => {
+                setCompactionSafeguardCancelReason(compactionSessionManager, undefined);
+                return activeSession.compact(mergedInstructions);
               },
-            },
-          );
+              compactionTimeoutMs,
+              {
+                abortSignal: params.abortSignal,
+                onCancel: () => {
+                  activeSession.abortCompaction();
+                },
+              },
+            );
+            skwCompactionOutcome = "success";
+            skwCompactionCompactedCount = Math.max(
+              0,
+              messageCountCompactionInput - session.messages.length,
+            );
+          } finally {
+            if (
+              skwCompactionTransactionStarted &&
+              skwCompactionId &&
+              skwMemoryManager?.finishCompaction
+            ) {
+              try {
+                await skwMemoryManager.finishCompaction({
+                  sessionId: params.sessionId,
+                  sessionKey: hookSessionKey,
+                  compactionId: skwCompactionId,
+                  outcome: skwCompactionOutcome,
+                  compactedCount:
+                    skwCompactionOutcome === "success" ? skwCompactionCompactedCount : undefined,
+                });
+              } catch (err) {
+                log.warn("skw compaction: finishCompaction failed", {
+                  errorMessage: formatErrorMessage(err),
+                });
+              }
+            }
+          }
           let effectiveFirstKeptEntryId = result.firstKeptEntryId;
           let postCompactionLeafId =
             typeof sessionManager.getLeafId === "function"
@@ -1702,6 +1835,7 @@ export const testing = {
   hardenManualCompactionBoundary,
   resolveCompactionProviderStream,
   prepareCompactionSessionAgent,
+  runSkwCompactionPrepare,
   runBeforeCompactionHooks,
   runAfterCompactionHooks,
   runPostCompactionSideEffects,

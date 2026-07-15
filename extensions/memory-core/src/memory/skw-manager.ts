@@ -2,14 +2,18 @@
 import { createHash } from "node:crypto";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/memory-core-host-engine-foundation";
 import type {
+  AgentEndParams,
+  EndSessionParams,
+  FinishCompactionParams,
   MemoryEmbeddingProbeResult,
-  MemoryLifecycleContext,
   MemoryPrefetchResult,
   MemoryProviderStatus,
   MemoryReadResult,
   MemorySearchManager,
   MemorySearchResult,
   MemorySource,
+  MemoryWriteParams,
+  PrepareCompactionParams,
   ResolvedSkwConfig,
 } from "openclaw/plugin-sdk/memory-core-host-engine-storage";
 import { parseSkwPrefetchResult } from "./skw-prefetch.js";
@@ -375,44 +379,80 @@ export class SkwMemorySearchManager implements MemorySearchManager {
     return parseSkwPrefetchResult(result);
   }
 
-  async memoryWrite(params: {
-    eventId: string;
-    content: string;
-    metadata?: { category?: "user_pref" | "general" };
-    sessionId?: string;
-    sessionKey?: string;
-  }): Promise<void> {
-    const process = await this.ensureProcess();
-    const result = await this.requestWithProcess(
-      process,
+  async memoryWrite(params: MemoryWriteParams): Promise<void> {
+    await this.lifecycleRequest(
       "memoryWrite",
-      { eventId: params.eventId, content: params.content, metadata: params.metadata },
-      undefined,
       {
-        agentId: this.params.agentId,
-        profile: this.keyParts.profile,
-        sessionId: params.sessionId,
-        sessionKey: params.sessionKey,
+        eventId: params.eventId,
+        target: params.target,
+        content: params.content,
+        metadata: params.metadata,
       },
+      { sessionId: params.sessionId, sessionKey: params.sessionKey },
     );
-    parseLifecycleResult(result);
-    await this.refreshStatusAfterOperation();
   }
 
-  async agentEnd(params: MemoryLifecycleContext): Promise<void> {
-    await this.lifecycleRequest("agentEnd", params);
+  async agentEnd(params: AgentEndParams): Promise<void> {
+    const frameParams: Record<string, unknown> = {
+      eventId: params.eventId,
+      success: params.success,
+      messages: params.messages,
+    };
+    if (typeof params.durationMs === "number" && Number.isFinite(params.durationMs)) {
+      frameParams.durationMs = params.durationMs;
+    }
+    await this.lifecycleRequest("agentEnd", frameParams, {
+      sessionId: params.sessionId,
+      sessionKey: params.sessionKey,
+    });
   }
 
-  async prepareCompaction(params: MemoryLifecycleContext): Promise<void> {
-    await this.lifecycleRequest("prepareCompaction", params);
+  async prepareCompaction(params: PrepareCompactionParams): Promise<void> {
+    const compactionId = params.compactionId ?? params.eventId;
+    if (!compactionId) {
+      throw new SkwProviderError("INVALID_REQUEST", "prepareCompaction requires compactionId");
+    }
+    await this.lifecycleRequest(
+      "prepareCompaction",
+      {
+        compactionId,
+        messages: params.messages ?? [],
+        maxCharacters: params.maxCharacters ?? 8192,
+      },
+      { sessionId: params.sessionId, sessionKey: params.sessionKey },
+    );
   }
 
-  async finishCompaction(params: MemoryLifecycleContext): Promise<void> {
-    await this.lifecycleRequest("finishCompaction", params);
+  async finishCompaction(params: FinishCompactionParams): Promise<void> {
+    const compactionId = params.compactionId ?? params.eventId;
+    if (!compactionId) {
+      throw new SkwProviderError("INVALID_REQUEST", "finishCompaction requires compactionId");
+    }
+    const frameParams: Record<string, unknown> = {
+      compactionId,
+      outcome: params.outcome,
+    };
+    if (params.outcome === "success" && typeof params.compactedCount === "number") {
+      frameParams.compactedCount = params.compactedCount;
+    }
+    await this.lifecycleRequest("finishCompaction", frameParams, {
+      sessionId: params.sessionId,
+      sessionKey: params.sessionKey,
+    });
   }
 
-  async endSession(params: MemoryLifecycleContext): Promise<void> {
-    await this.lifecycleRequest("endSession", params);
+  async endSession(params: EndSessionParams): Promise<void> {
+    const frameParams: Record<string, unknown> = { reason: params.reason };
+    if (params.nextSessionId) {
+      frameParams.nextSessionId = params.nextSessionId;
+    }
+    if (params.nextSessionKey) {
+      frameParams.nextSessionKey = params.nextSessionKey;
+    }
+    await this.lifecycleRequest("endSession", frameParams, {
+      sessionId: params.sessionId,
+      sessionKey: params.sessionKey,
+    });
   }
 
   async readFile(params: {
@@ -606,15 +646,16 @@ export class SkwMemorySearchManager implements MemorySearchManager {
   }
 
   private async lifecycleRequest(
-    op: "agentEnd" | "prepareCompaction" | "finishCompaction" | "endSession",
-    params: MemoryLifecycleContext,
+    op: "memoryWrite" | "agentEnd" | "prepareCompaction" | "finishCompaction" | "endSession",
+    params: Record<string, unknown>,
+    sessionIdentity: { sessionId?: string; sessionKey?: string },
   ): Promise<void> {
     const process = await this.ensureProcess();
-    const result = await this.requestWithProcess(process, op, {}, undefined, {
+    const result = await this.requestWithProcess(process, op, params, undefined, {
       agentId: this.params.agentId,
       profile: this.keyParts.profile,
-      sessionId: params.sessionId,
-      sessionKey: params.sessionKey,
+      sessionId: sessionIdentity.sessionId,
+      sessionKey: sessionIdentity.sessionKey,
     });
     parseLifecycleResult(result);
     await this.refreshStatusAfterOperation();

@@ -137,6 +137,7 @@ export async function runMemoryAdd(opts: MemoryAddCommandOptions): Promise<void>
       try {
         await manager.memoryWrite({
           eventId,
+          target,
           content,
           metadata: { category: targetToCategory(target) },
         });

@@ -172,10 +172,50 @@ export type MemoryPrefetchResult = {
   systemPromptBlock?: string;
 };
 
-/** Context shared by memory lifecycle hooks and write operations. */
+/** Identity/session context shared by all memory lifecycle operations. */
 export type MemoryLifecycleContext = {
   sessionId?: string;
   sessionKey?: string;
+};
+
+export type MemoryMessage = { role: string; text: string };
+
+export type MemoryWriteParams = MemoryLifecycleContext & {
+  eventId: string;
+  target: string;
+  content: string;
+  metadata?: { category?: "user_pref" | "general" };
+};
+
+export type AgentEndParams = MemoryLifecycleContext & {
+  eventId: string;
+  success: boolean;
+  messages: MemoryMessage[];
+  durationMs?: number;
+};
+
+export type PrepareCompactionResult = {
+  preservationContext?: string;
+};
+
+export type PrepareCompactionParams = MemoryLifecycleContext & {
+  compactionId?: string;
+  eventId?: string;
+  messages?: MemoryMessage[];
+  maxCharacters?: number;
+};
+
+export type FinishCompactionParams = MemoryLifecycleContext & {
+  compactionId?: string;
+  eventId?: string;
+  outcome: "success" | "failed";
+  compactedCount?: number;
+};
+
+export type EndSessionParams = MemoryLifecycleContext & {
+  reason: string;
+  nextSessionId?: string;
+  nextSessionKey?: string;
 };
 
 /** Search/read/sync/status/lifecycle contract implemented by memory managers. */
@@ -219,15 +259,9 @@ export interface MemorySearchManager {
    * Optional bounded operator write to a writable SKW backend.
    * Implemented by SKW managers; QMD and builtin backends return unsupported.
    */
-  memoryWrite?(
-    params: MemoryLifecycleContext & {
-      eventId: string;
-      content: string;
-      metadata?: { category?: "user_pref" | "general" };
-    },
-  ): Promise<void>;
-  agentEnd?(params: MemoryLifecycleContext): Promise<void>;
-  prepareCompaction?(params: MemoryLifecycleContext): Promise<void>;
-  finishCompaction?(params: MemoryLifecycleContext): Promise<void>;
-  endSession?(params: MemoryLifecycleContext): Promise<void>;
+  memoryWrite?(params: MemoryWriteParams): Promise<void>;
+  agentEnd?(params: AgentEndParams): Promise<void>;
+  prepareCompaction?(params: PrepareCompactionParams): Promise<PrepareCompactionResult | void>;
+  finishCompaction?(params: FinishCompactionParams): Promise<void>;
+  endSession?(params: EndSessionParams): Promise<void>;
 }

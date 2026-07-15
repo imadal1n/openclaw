@@ -3,6 +3,17 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { emptyPluginConfigSchema } from "../plugins/config-schema.js";
 import { createCachedLazyValueGetter } from "./lazy-value.js";
 
+export type {
+  PluginHookAfterCompactionEvent,
+  PluginHookAgentContext,
+  PluginHookAgentEndEvent,
+  PluginHookBeforeCompactionEvent,
+  PluginHookSessionContext,
+  PluginHookSessionEndEvent,
+  PluginHookSessionEndReason,
+  PluginHookSessionStartEvent,
+} from "../plugins/hook-types.js";
+
 export type AnyAgentTool = import("../plugins/types.js").AnyAgentTool;
 export type AgentHarness = import("../plugins/types.js").AgentHarness;
 export type AgentPromptGuidance = import("../plugins/types.js").AgentPromptGuidance;
