@@ -10,6 +10,7 @@ import {
   parseStrictPositiveInteger,
 } from "openclaw/plugin-sdk/number-runtime";
 import type {
+  MemoryAddCommandOptions,
   MemoryCommandOptions,
   MemoryPromoteCommandOptions,
   MemoryPromoteExplainOptions,
@@ -70,6 +71,11 @@ async function runMemoryRemHarness(opts: MemoryRemHarnessOptions) {
 async function runMemoryRemBackfill(opts: MemoryRemBackfillOptions) {
   const runtime = await loadMemoryCliRuntime();
   await runtime.runMemoryRemBackfill(opts);
+}
+
+async function runMemoryAdd(opts: MemoryAddCommandOptions) {
+  const { runMemoryAdd: run } = await import("./cli/memory-add.js");
+  await run(opts);
 }
 
 function invalidCliArgument(message: string): Error & { code: string; exitCode: number } {
@@ -175,6 +181,16 @@ export function registerMemoryCli(program: Command) {
     .option("--verbose", "Verbose logging", false)
     .action(async (opts: MemoryCommandOptions) => {
       await runMemoryIndex(opts);
+    });
+
+  memory
+    .command("add")
+    .description("Add a bounded operator memory entry to a writable SKW backend")
+    .option("--agent <id>", "Agent id (default: default agent)")
+    .option("--target <user|general>", "Memory category target")
+    .requiredOption("--content-file <path>", "Path to a regular file to write (max 16 KiB)")
+    .action(async (opts: MemoryAddCommandOptions) => {
+      await runMemoryAdd(opts);
     });
 
   memory

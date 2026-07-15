@@ -33,6 +33,7 @@ export type {
 } from "./host/backend-config.js";
 export type {
   MemoryEmbeddingProbeResult,
+  MemoryLifecycleContext,
   MemoryPrefetchQuality,
   MemoryPrefetchResult,
   MemoryProviderStatus,

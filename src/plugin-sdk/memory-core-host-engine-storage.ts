@@ -58,6 +58,7 @@ export type SkwSessionArtifactMetadata = {
 
 export type SkwMemoryMetadata = {
   readonly backend: "skw";
+  readonly category?: "user_pref" | "general";
   readonly truthTier?: SkwTruthTier;
   readonly visibility?: SkwVisibility;
   readonly priority?: string | number;
@@ -116,15 +117,16 @@ export type MemoryEmbeddingProbeResult = {
 export type {
   MemoryChunk,
   MemoryFileEntry,
+  MemoryLifecycleContext,
   MemoryPrefetchQuality,
   MemoryPrefetchResult,
   MemoryProviderStatus,
   MemoryReadResult,
   MemorySearchManager,
   MemorySearchRuntimeDebug,
-  MemorySyncProgressUpdate,
   MemorySessionSyncTarget,
   MemorySyncParams,
+  MemorySyncProgressUpdate,
   ResolvedMemoryBackendConfig,
   ResolvedQmdConfig,
   ResolvedQmdMcporterConfig,

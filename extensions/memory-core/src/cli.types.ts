@@ -34,6 +34,11 @@ export type MemoryRemHarnessOptions = MemoryCommandOptions & {
   grounded?: boolean;
 };
 
+export type MemoryAddCommandOptions = MemoryCommandOptions & {
+  target?: "user" | "general";
+  contentFile?: string;
+};
+
 export type MemoryRemBackfillOptions = MemoryCommandOptions & {
   path?: string;
   rollback?: boolean;

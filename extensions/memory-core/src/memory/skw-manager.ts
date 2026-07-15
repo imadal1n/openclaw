@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/memory-core-host-engine-foundation";
 import type {
   MemoryEmbeddingProbeResult,
+  MemoryLifecycleContext,
   MemoryPrefetchResult,
   MemoryProviderStatus,
   MemoryReadResult,
@@ -251,6 +252,12 @@ function parseReadResult(value: unknown): MemoryReadResult {
   return { text: value.text, path: value.path };
 }
 
+function parseLifecycleResult(value: unknown): void {
+  if (value !== undefined && !isRecord(value)) {
+    throw new SkwProviderError("MALFORMED_OUTPUT", "lifecycle result is malformed");
+  }
+}
+
 export class SkwMemorySearchManager implements MemorySearchManager {
   private readonly keyParts: ProcessKeyParts;
   private readonly key: string;
@@ -366,6 +373,46 @@ export class SkwMemorySearchManager implements MemorySearchManager {
     );
     await this.refreshStatusAfterOperation();
     return parseSkwPrefetchResult(result);
+  }
+
+  async memoryWrite(params: {
+    eventId: string;
+    content: string;
+    metadata?: { category?: "user_pref" | "general" };
+    sessionId?: string;
+    sessionKey?: string;
+  }): Promise<void> {
+    const process = await this.ensureProcess();
+    const result = await this.requestWithProcess(
+      process,
+      "memoryWrite",
+      { eventId: params.eventId, content: params.content, metadata: params.metadata },
+      undefined,
+      {
+        agentId: this.params.agentId,
+        profile: this.keyParts.profile,
+        sessionId: params.sessionId,
+        sessionKey: params.sessionKey,
+      },
+    );
+    parseLifecycleResult(result);
+    await this.refreshStatusAfterOperation();
+  }
+
+  async agentEnd(params: MemoryLifecycleContext): Promise<void> {
+    await this.lifecycleRequest("agentEnd", params);
+  }
+
+  async prepareCompaction(params: MemoryLifecycleContext): Promise<void> {
+    await this.lifecycleRequest("prepareCompaction", params);
+  }
+
+  async finishCompaction(params: MemoryLifecycleContext): Promise<void> {
+    await this.lifecycleRequest("finishCompaction", params);
+  }
+
+  async endSession(params: MemoryLifecycleContext): Promise<void> {
+    await this.lifecycleRequest("endSession", params);
   }
 
   async readFile(params: {
@@ -556,6 +603,21 @@ export class SkwMemorySearchManager implements MemorySearchManager {
       throw new SkwProviderError("UNAVAILABLE", "provider process unavailable", true);
     }
     return this.process;
+  }
+
+  private async lifecycleRequest(
+    op: "agentEnd" | "prepareCompaction" | "finishCompaction" | "endSession",
+    params: MemoryLifecycleContext,
+  ): Promise<void> {
+    const process = await this.ensureProcess();
+    const result = await this.requestWithProcess(process, op, {}, undefined, {
+      agentId: this.params.agentId,
+      profile: this.keyParts.profile,
+      sessionId: params.sessionId,
+      sessionKey: params.sessionKey,
+    });
+    parseLifecycleResult(result);
+    await this.refreshStatusAfterOperation();
   }
 
   private async request(

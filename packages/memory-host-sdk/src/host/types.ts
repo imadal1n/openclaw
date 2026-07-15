@@ -20,6 +20,7 @@ export type SkwSessionArtifactMetadata = {
 
 export type SkwMemoryMetadata = {
   readonly backend: "skw";
+  readonly category?: "user_pref" | "general";
   readonly truthTier?: SkwTruthTier;
   readonly visibility?: SkwVisibility;
   readonly priority?: string | number;
@@ -171,7 +172,13 @@ export type MemoryPrefetchResult = {
   systemPromptBlock?: string;
 };
 
-/** Search/read/sync/status contract implemented by memory managers. */
+/** Context shared by memory lifecycle hooks and write operations. */
+export type MemoryLifecycleContext = {
+  sessionId?: string;
+  sessionKey?: string;
+};
+
+/** Search/read/sync/status/lifecycle contract implemented by memory managers. */
 export interface MemorySearchManager {
   search(
     query: string,
@@ -208,4 +215,19 @@ export interface MemorySearchManager {
     sessionKey?: string;
     sessionId?: string;
   }): Promise<MemoryPrefetchResult>;
+  /**
+   * Optional bounded operator write to a writable SKW backend.
+   * Implemented by SKW managers; QMD and builtin backends return unsupported.
+   */
+  memoryWrite?(
+    params: MemoryLifecycleContext & {
+      eventId: string;
+      content: string;
+      metadata?: { category?: "user_pref" | "general" };
+    },
+  ): Promise<void>;
+  agentEnd?(params: MemoryLifecycleContext): Promise<void>;
+  prepareCompaction?(params: MemoryLifecycleContext): Promise<void>;
+  finishCompaction?(params: MemoryLifecycleContext): Promise<void>;
+  endSession?(params: MemoryLifecycleContext): Promise<void>;
 }
