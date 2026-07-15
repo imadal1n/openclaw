@@ -1828,14 +1828,24 @@ export async function startGatewayServer(
         markClosePreludeStarted();
         await stopRegisteredGatewayLifetimeSidecars();
         await stopRegisteredPostReadySidecars();
-        // Run gateway_stop plugin hook before shutdown
-        const { runGlobalGatewayStopSafely } = await import("../plugins/hook-runner-global.js");
-        await runGlobalGatewayStopSafely({
-          event: { reason: optsLocal?.reason ?? "gateway stopping" },
-          ctx: { port },
-          onError: (err) => log.warn(`gateway_stop hook failed: ${String(err)}`),
+        const { runGatewayStopMemoryPrelude } = await import("./server-skw-memory-shutdown.js");
+        await runGatewayStopMemoryPrelude({
+          runGlobalGatewayStopSafely: async () => {
+            const { runGlobalGatewayStopSafely } = await import("../plugins/hook-runner-global.js");
+            await runGlobalGatewayStopSafely({
+              event: { reason: optsLocal?.reason ?? "gateway stopping" },
+              ctx: { port },
+              onError: (err) => log.warn(`gateway_stop hook failed: ${String(err)}`),
+            });
+          },
+          closeMemoryRuntime: async () => {
+            const { closeActiveMemorySearchManagers } =
+              await import("../plugins/memory-runtime.js");
+            await closeActiveMemorySearchManagers();
+          },
+          runClosePrelude,
+          warn: (message) => log.warn(message),
         });
-        await runClosePrelude();
         await close(optsLocal);
       } finally {
         clearFallbackGatewayContextForServer();
