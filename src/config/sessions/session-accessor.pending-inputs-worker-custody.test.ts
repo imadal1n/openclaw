@@ -378,6 +378,45 @@ it.each(["turn", "locked"] as const)(
         ).rejects.toThrow();
         expect(dispatched).toBe(false);
         const database = openOpenClawAgentDatabase(scope);
+        const pendingBeforeRevokedAdmission = database.db
+          .prepare("SELECT input_id FROM session_pending_inputs ORDER BY seq")
+          .all();
+        let hookRan = false;
+        for (const prepareWithHook of [false, true]) {
+          await expect(
+            stageSessionPendingInput(scope, {
+              runId: `revoked-custody-${prepareWithHook}`,
+              message: {
+                ...admitted!.message,
+                idempotencyKey: `revoked-custody-${prepareWithHook}:user`,
+              },
+              assertCurrent,
+              assertAdmittedCurrent: assertCurrent,
+              authority: authorization.admittedInputAuthority,
+              ...(prepareWithHook
+                ? {
+                    prepareMessageAfterIdempotencyCheck: (message: PersistedUserTurnMessage) => {
+                      hookRan = true;
+                      return message;
+                    },
+                  }
+                : {}),
+            }),
+          ).rejects.toThrow();
+        }
+        expect(hookRan).toBe(false);
+        await expect(
+          stageSessionPendingInput(scope, {
+            runId: "prepared-custody",
+            message: admitted!.message,
+            assertCurrent,
+            assertAdmittedCurrent: assertCurrent,
+            authority: authorization.admittedInputAuthority,
+          }),
+        ).rejects.toThrow();
+        expect(
+          database.db.prepare("SELECT input_id FROM session_pending_inputs ORDER BY seq").all(),
+        ).toEqual(pendingBeforeRevokedAdmission);
         const original = database.db
           .prepare("SELECT entry_json, entry_valid FROM session_nodes WHERE session_key = ?")
           .get(scope.sessionKey);

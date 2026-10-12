@@ -298,7 +298,10 @@ async function stagePreparedPendingInput(
     if (snapshot.kind !== "stage") {
       throw new Error("Pending input read returned a different operation");
     }
-    await assertCurrent();
+    // Replays disclose retained input; fresh input is authorized at its hook and durable write.
+    if (snapshot.existing || snapshot.previous || snapshot.committed) {
+      await assertCurrent();
+    }
     assertAgentRunLifecycleGenerationCurrent(lifecycleGeneration);
     if (!snapshot.current) {
       return undefined;
