@@ -6,7 +6,10 @@ import { AsyncWorkScope, trackAsyncWork } from "../../shared/async-work-scope.js
 import { createDeferredCore } from "../../shared/deferred.js";
 import { captureOpenClawStateWorkerContext } from "../../state/openclaw-state-worker-context.js";
 import { runOpenClawStateWorkerOperation } from "../../state/openclaw-state-worker-store.js";
-import { registerUserModelAuthProfileSecrets } from "../../state/user-model-accounts.js";
+import {
+  normalizeUserModelAuthProfile,
+  registerUserModelAuthProfileSecrets,
+} from "../../state/user-model-accounts.js";
 import { AUTH_STORE_VERSION } from "./constants.js";
 import { observeCanonicalAuthProfileCredentials } from "./credential-observation.js";
 import { assertPersonalAuthProfileRuntime } from "./runtime-scope.js";
@@ -83,7 +86,7 @@ export function withPersonalAuthProfileStore<T>(
               );
             }
             // The updater may retain its draft; reconciliation owns the dispatched postimage.
-            const next: UserModelAuthProfile = structuredClone({
+            const next = normalizeUserModelAuthProfile({
               credential,
               usageStats: store.usageStats?.[profileId],
             });

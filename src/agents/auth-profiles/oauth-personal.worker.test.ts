@@ -1,5 +1,6 @@
 import { deserialize } from "node:v8";
 import { Worker } from "node:worker_threads";
+import { expectDefined } from "@openclaw/normalization-core/expect";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { afterEach, expect, it, vi } from "vitest";
 import {
@@ -25,7 +26,8 @@ import {
 import { createOAuthManager } from "./oauth-manager.js";
 import { resolveApiKeyForProfile } from "./oauth.js";
 import { withPersonalAuthProfileStore } from "./personal-store.js";
-import type { OAuthCredential } from "./types.js";
+import type { OAuthCredential, ProfileUsageStats } from "./types.js";
+import { reconcileWhamBlock } from "./usage-reduction.js";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -86,6 +88,49 @@ it("does not disclose a personal API key when its worker read is canceled", asyn
         signal: controller.signal,
       }),
     ).rejects.toBe(reason);
+  });
+});
+
+it.each([false, true])("persists a quota recheck with available=%s", async (available) => {
+  await withOpenClawTestState({ scenario: "minimal" }, async () => {
+    const { profileId, credential } = fixture();
+    const now = 1_800_000_000_000;
+    const blocked: ProfileUsageStats = {
+      blockedUntil: now + 86_400_000,
+      blockedReason: "subscription_limit",
+      blockedSource: "wham",
+      lastProbeAt: now - 600_000,
+    };
+    updateUserModelAuthProfile(profileId, (profile) => {
+      profile.usageStats = blocked;
+      return true;
+    });
+    const result = await withPersonalAuthProfileStore(profileId, async (owner) => {
+      await owner.update((store) => {
+        expectDefined(store.usageStats?.[profileId], "seeded quota").lastProbeAt = now;
+        return true;
+      });
+      return owner.update((store) => {
+        const stats = expectDefined(store.usageStats?.[profileId], "claimed quota");
+        Object.assign(
+          stats,
+          reconcileWhamBlock(
+            stats,
+            available
+              ? { available: true, cooldownMs: 0 }
+              : { blockedUntil: blocked.blockedUntil, cooldownMs: 0 },
+            now,
+          ),
+        );
+        return true;
+      });
+    });
+    const expected = {
+      credential,
+      usageStats: available ? { lastProbeAt: now } : { ...blocked, lastProbeAt: now },
+    };
+    expect(readUserModelAuthProfile(profileId)).toStrictEqual(expected);
+    expect(result?.usageStats?.[profileId]).toStrictEqual(expected.usageStats);
   });
 });
 
@@ -355,11 +400,13 @@ it("publishes only the exact acknowledged personal postimage when its result fra
     try {
       const result = await withPersonalAuthProfileStore(profileId, (owner) =>
         owner.update((store) => {
-          store.profiles[profileId] = replacement;
+          store.profiles[profileId] = { ...replacement, idToken: undefined };
+          store.usageStats = { [profileId]: { lastProbeAt: 123, blockedUntil: undefined } };
           return true;
         }),
       );
-      expect(result?.profiles[profileId]).toEqual(acknowledged);
+      expect(result?.profiles[profileId]).toStrictEqual(acknowledged);
+      expect(result?.usageStats?.[profileId]).toStrictEqual({ lastProbeAt: 123 });
       expect(terminated).toBeDefined();
       await terminated;
       expect(attempts).toBe(1);
