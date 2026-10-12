@@ -137,7 +137,10 @@ export function withPersonalAuthProfileStore<T>(
             }
           },
           async accept(credential, assertSelectionCurrent) {
-            const prepared = structuredClone(credential);
+            const prepared = normalizeUserModelAuthProfile({ credential }).credential;
+            if (prepared.type !== "oauth") {
+              throw new Error("Personal credential codec changed the prepared credential type");
+            }
             // Accept while the actor still holds the exact-row snapshot and FIFO turn.
             const accepted = await runOpenClawStateWorkerOperation(
               context,

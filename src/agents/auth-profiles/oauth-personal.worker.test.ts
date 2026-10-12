@@ -180,6 +180,31 @@ it.each(["capability", "format"] as const)(
   },
 );
 
+it("accepts refreshed credentials with undefined optionals without repeating provider preparation", async () => {
+  await withOpenClawTestState({ scenario: "minimal" }, async () => {
+    const { profileId, credential, replacement } = fixture();
+    const refreshCredential = vi.fn(async () => ({ ...replacement, displayName: undefined }));
+    const buildApiKey = vi.fn(
+      async (_provider: string, current: OAuthCredential) => current.access,
+    );
+    const manager = createOAuthManager({
+      canRefreshCredential: async () => true,
+      refreshCredential,
+      buildApiKey,
+      readBootstrapCredential: () => null,
+    });
+    const result = await manager.resolveOAuthAccess({
+      profileId,
+      credential,
+      store: { version: 1, profiles: { [profileId]: credential } },
+    });
+    expect(result).toStrictEqual({ apiKey: replacement.access, credential: replacement });
+    expect(readUserModelAuthProfile(profileId)?.credential).toStrictEqual(replacement);
+    expect(refreshCredential).toHaveBeenCalledTimes(1);
+    expect(buildApiKey).toHaveBeenCalledTimes(1);
+  });
+});
+
 it("rechecks a live pin after refresh and never discloses a revoked selection", async () => {
   await withOpenClawTestState({ scenario: "minimal" }, async () => {
     const { owner, profileId, credential, replacement } = fixture();
