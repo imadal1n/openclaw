@@ -4694,6 +4694,11 @@ process.on("exit", () => {
         path.join(origin, "scripts/check-changed.mjs"),
         path.join(origin, "scripts/source-fixture.mjs"),
       );
+      // Real transports carry this repo's Testbox redaction stage; the synthetic source passes through.
+      writeFileSync(
+        path.join(origin, "scripts/crabbox-remote-redact.mjs"),
+        'import { spawnSync } from "node:child_process"; const [, command, ...args] = process.argv.slice(2); process.exit(spawnSync(command, args, { stdio: "inherit" }).status ?? 1);\n',
+      );
       if (scenario === "captured-base") {
         writeFileSync(
           path.join(origin, "scripts/check.mts"),
