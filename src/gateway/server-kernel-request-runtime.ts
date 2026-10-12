@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { listAgentIds } from "../agents/agent-scope-config.js";
 import { getRuntimeConfig } from "../config/io.js";
 import { retireQuestionChannelGateway } from "../infra/question-channel-runtime.js";
@@ -78,7 +79,8 @@ export async function prepareGatewayKernelRequestRuntime(params: {
       projection?.dispose();
     },
   });
-  const initializeRequestRuntime = async () => {
+  // An early request may initialize this while other listeners bind; keep startup ownership.
+  const initializeRequestRuntime = AsyncLocalStorage.bind(async () => {
     projectionReady = runtime.opts.updateCanary
       ? undefined
       : startupTrace.measure("sessions.projection", async () => {
@@ -124,7 +126,7 @@ export async function prepareGatewayKernelRequestRuntime(params: {
         }),
       );
     }
-  };
+  });
   const ensureRequestRuntimeReady = () => (requestRuntimeReady ??= initializeRequestRuntime());
   gatewayRequestContext.requestEntryLifetime = runtime.requestEntryLifetime;
   bindApprovalPublicationContext(gatewayRequestContext);

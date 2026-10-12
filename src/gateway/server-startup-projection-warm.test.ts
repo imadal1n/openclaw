@@ -37,19 +37,23 @@ function createStartupState(label: string) {
   });
 }
 
-it("serves liveness while an early session request waits for the complete projection", async ({
-  signal,
-}) => {
+it("retains projection startup when an early session request disconnects", async ({ signal }) => {
   const port = await getFreePort();
   const token = "startup-projection-synthetic-token";
   const state = await createStartupState("startup-projection-http");
   const projectionEntered = createDeferred();
   const releaseProjection = createDeferred();
+  const listenerBound = createDeferred();
+  const releaseListening = createDeferred();
   const entryReceived = createDeferred<ServerResponse>();
+  const secondEntryReceived = createDeferred<ServerResponse>();
+  const entryClosed = createDeferred();
   const requests = new AbortController();
+  const earlyRequest = new AbortController();
   const requestSignal = AbortSignal.any([signal, requests.signal]);
   const entryPath = `${buildControlUiSessionEntryUrl("/chat/main/topic", "")}&probe=1`;
   let startup: Promise<GatewayServer> | undefined;
+  let earlyEntryRequest: Promise<Response> | undefined;
   let entryRequest: Promise<Response> | undefined;
   try {
     await state.writeConfig({
@@ -74,12 +78,21 @@ it("serves liveness while an early session request waits for the complete projec
     const createTransport = transportModule.createGatewayHttpTransport;
     vi.spyOn(transportModule, "createGatewayHttpTransport").mockImplementation(async (params) => {
       const transport = await createTransport(params);
+      const entryResponses = [entryReceived, secondEntryReceived];
       transport.httpServer.on("request", (req, res) => {
         if (req.url === entryPath) {
-          entryReceived.resolve(res);
+          entryResponses.shift()?.resolve(res);
+          res.once("close", entryClosed.resolve);
         }
       });
-      return transport;
+      return {
+        ...transport,
+        startListening: async () => {
+          await transport.startListening();
+          listenerBound.resolve();
+          await releaseListening.promise;
+        },
+      };
     });
     const { startGatewayServerCore } = await import("./server-start.js");
     startup = startGatewayServerCore(port, {
@@ -90,23 +103,32 @@ it("serves liveness while an early session request waits for the complete projec
     });
     await withinTest(
       awaitGateBeforeSettlement(
-        projectionEntered.promise,
+        listenerBound.promise,
         startup,
-        "Gateway startup completed without preparing its session projection",
+        "Gateway startup completed before its listener was available",
       ),
       signal,
     );
-    const read = (path: string) =>
+    const read = (path: string, fetchSignal = requestSignal) =>
       fetch(`http://127.0.0.1:${port}${path}`, {
         headers: { authorization: `Bearer ${token}` },
-        signal: requestSignal,
+        signal: fetchSignal,
       });
-    entryRequest = read(entryPath);
+    earlyEntryRequest = read(entryPath, AbortSignal.any([requestSignal, earlyRequest.signal]));
+    void earlyEntryRequest.catch(() => {});
     const entryResponse = await withinTest(
       awaitGateBeforeSettlement(
         entryReceived.promise,
-        entryRequest,
+        earlyEntryRequest,
         "Session entry request did not reach the Gateway listener",
+      ),
+      signal,
+    );
+    await withinTest(
+      awaitGateBeforeSettlement(
+        projectionEntered.promise,
+        earlyEntryRequest,
+        "Session entry request completed without preparing its session projection",
       ),
       signal,
     );
@@ -120,16 +142,31 @@ it("serves liveness while an early session request waits for the complete projec
       await response.arrayBuffer();
     }
     expect(entryResponse.writableEnded).toBe(false);
+    earlyRequest.abort();
+    await withinTest(entryClosed.promise, signal);
+    entryRequest = read(entryPath);
+    const secondEntryResponse = await withinTest(
+      awaitGateBeforeSettlement(
+        secondEntryReceived.promise,
+        entryRequest,
+        "Second session entry request did not reach the Gateway listener",
+      ),
+      signal,
+    );
+    expect(secondEntryResponse.writableEnded).toBe(false);
     releaseProjection.resolve();
+    releaseListening.resolve();
     expect((await entryRequest).status).toBe(204);
     const server = await startup;
     await server.startupSettled;
   } finally {
     releaseProjection.resolve();
+    releaseListening.resolve();
     requests.abort();
     try {
       const server = await startup?.catch(() => undefined);
       await server?.close();
+      await earlyEntryRequest?.catch(() => undefined);
       await entryRequest?.catch(() => undefined);
     } finally {
       vi.restoreAllMocks();
