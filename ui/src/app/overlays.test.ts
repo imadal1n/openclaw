@@ -19,7 +19,8 @@ import {
 } from "./overlays-access.test-support.ts";
 import { createApplicationOverlays } from "./overlays.ts";
 
-vi.mock("../build-info.ts", () => ({
+vi.mock("../build-info.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../build-info.ts")>()),
   CONTROL_UI_BUILD_INFO: { version: "1.0.0", buildId: "test" },
   controlUiBuildDiffersFrom: (identity: {
     version?: string | null;
