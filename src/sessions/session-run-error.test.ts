@@ -4,6 +4,7 @@ import type { CustomMessageReportAppend } from "../config/sessions/session-acces
 import { SessionTranscriptWriterClaimReboundError } from "../config/sessions/session-transcript-writer-claim-error.js";
 import { recordGatewaySessionRunFailure, resolveSessionRunError } from "./session-run-error.js";
 
+// mock-isolation: Capture run-failure notices without opening a real session store.
 vi.mock("../config/sessions/session-accessor.js", () => ({
   appendSessionTranscriptReport: vi.fn(),
 }));
