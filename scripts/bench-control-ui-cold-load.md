@@ -12,6 +12,15 @@ connects to a real Gateway or account. The reusable inventory is
 `ui/src/test-helpers/control-ui-team-scale-fixture.ts`; its browser contract is
 `ui/src/e2e/team-scale-cold-load.e2e.test.ts`.
 
+The browser contract belongs to the existing release-only UI tier. Automatic CI
+runs it only when that test file changes; full manual/release validation retains
+it. The fixture remains in the normal UI TypeScript graph. To run the contract
+explicitly:
+
+```sh
+pnpm test ui/src/e2e/team-scale-cold-load.e2e.test.ts --maxWorkers=1
+```
+
 The selected agent has 300 sessions with a 200-row first page, 30 pinned dashboards
 outside that page, 34 owners, 120 people, six agent identities, six UI plugins,
 240 transcript messages, and 12 inline widgets. Six catalog-host events and twelve
