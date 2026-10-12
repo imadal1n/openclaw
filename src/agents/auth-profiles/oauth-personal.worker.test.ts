@@ -400,7 +400,8 @@ it("publishes only the exact acknowledged personal postimage when its result fra
     try {
       const result = await withPersonalAuthProfileStore(profileId, (owner) =>
         owner.update((store) => {
-          store.profiles[profileId] = { ...replacement, idToken: undefined };
+          replacement.idToken = undefined;
+          store.profiles[profileId] = replacement;
           store.usageStats = { [profileId]: { lastProbeAt: 123, blockedUntil: undefined } };
           return true;
         }),
