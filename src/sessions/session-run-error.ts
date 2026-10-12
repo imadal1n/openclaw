@@ -2,7 +2,10 @@ import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { sliceUtf16Safe, truncateUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
 import type { SessionRunStatus } from "../../packages/gateway-protocol/src/schema/sessions-row.js";
 import { renderUserFacingText } from "../agents/embedded-agent-helpers/user-facing-text.js";
-import { renderAssistantRequestFailureCopy } from "../agents/failover/assistant-request-failure-copy.js";
+import {
+  renderAssistantRequestFailureCopy,
+  renderStorageFailureSummary,
+} from "../agents/failover/assistant-request-failure-copy.js";
 import { renderCodexAppServerFailureCopy } from "../agents/failover/user-copy.js";
 import {
   appendSessionTranscriptReport,
@@ -87,9 +90,8 @@ export function resolveSessionRunError(
     return STATE_CONTENTION_SUMMARY;
   }
   const error =
-    renderAssistantRequestFailureCopy({
-      storageFailure: classifyGatewayStorageFailure(outcome.error),
-    }) ?? sanitizeSessionRunError(outcome.error);
+    renderStorageFailureSummary(classifyGatewayStorageFailure(outcome.error)) ??
+    sanitizeSessionRunError(outcome.error);
   if (error.length <= SESSION_RUN_ERROR_MAX_CHARS) {
     return error || undefined;
   }
