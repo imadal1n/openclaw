@@ -255,8 +255,9 @@ appropriate trust model.
 ## TypeScript
 
 TypeScript-style signatures describe tool inputs and outputs to the model through
-the quick index, catalog handles, and `API.read` declaration files. Unknown
-outputs stay `unknown`, and declarations do not grant access to additional tools.
+catalog handles and `API.read` declaration files; the `exec` description itself
+stays catalog-independent and byte-stable. Unknown outputs stay `unknown`, and
+declarations do not grant access to additional tools.
 
 Executable cells are plain JavaScript. Code Mode does not load a TypeScript
 compiler, strip annotations, or typecheck the program. The selected engine parses and runs

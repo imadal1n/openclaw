@@ -700,7 +700,10 @@ describe("Code Mode subscribed bridge lifecycle", () => {
       tools: [fakeTool("client_probe", "Client probe")],
     });
     expect(testing.activeRuns.get(runId)).toBe(initial);
-    expect(exec.description).toContain("client_probe");
+    // The exec description stays byte-stable across catalog changes; the
+    // client tool is discoverable through the catalog instead.
+    expect(exec.description).not.toContain("client_probe");
+    expect(owner.catalogRef.current?.entries.map((entry) => entry.name)).toContain("client_probe");
 
     for (let index = 0; index < 2; index += 1) {
       const previous = expectDefined(testing.activeRuns.get(runId), "previous snapshot");

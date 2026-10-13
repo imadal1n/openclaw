@@ -451,9 +451,10 @@ describe("prepareEmbeddedAttemptClientTools", () => {
       codeModeSkills,
     });
     const initialExec = compacted.tools.find((tool) => tool.name === "exec");
-    expect(initialExec?.description).toContain(
-      "- llm_task { secret: string } -> { receipt: string }",
-    );
+    // The prompt never embeds catalog names or schemas, so a later client
+    // collision cannot leave a stale owner contract advertised in it.
+    expect(initialExec?.description).not.toContain("llm_task");
+    expect(initialExec?.description).not.toContain("secret");
     expect(initialExec?.description).toContain("skills.read(name)");
 
     const prepared = prepare({
@@ -475,10 +476,13 @@ describe("prepareEmbeddedAttemptClientTools", () => {
     expect(projection.byCallableName.get("llm_task")?.source).toBe("client");
 
     const providerExec = prepared.allCustomTools.find((tool) => tool.name === "exec");
-    expect(providerExec?.description).toContain("- llm_task unknown -> ?");
-    expect(providerExec?.description).toContain(
-      `- ${trustedBinding?.callableName} { secret: string } -> { receipt: string }`,
-    );
+    // Byte-stable across the collision: the client took over the llm_task
+    // callable and the plugin moved to a suffixed name, yet the tools array
+    // the provider sees does not change and advertises neither schema.
+    expect(providerExec?.description).toBe(initialExec?.description);
+    expect(providerExec?.description).not.toContain("llm_task");
+    expect(providerExec?.description).not.toContain(trustedBinding?.callableName);
+    expect(providerExec?.description).not.toContain("secret");
     expect(providerExec?.description).toContain("skills.read(name)");
 
     const guestResult = await runUntilCompleted({
@@ -487,12 +491,21 @@ describe("prepareEmbeddedAttemptClientTools", () => {
       code: `
         const [match] = await catalog.search("orchard harvesting", { limit: 1 });
         const result = await match({ secret: "fixture-secret-never-client" });
-        return { callableName: match.callableName, result };
+        const [owner] = await catalog.search("llm_task", { limit: 1 });
+        const ownerDescribed = await owner.describe();
+        return {
+          callableName: match.callableName,
+          result,
+          ownerCallableName: owner.callableName,
+          ownerSource: ownerDescribed.source,
+        };
       `,
     });
     expect(guestResult.value).toEqual({
       callableName: trustedBinding?.callableName,
       result: { receipt: "trusted-plugin" },
+      ownerCallableName: "llm_task",
+      ownerSource: "client",
     });
     expect(receivedSecrets).toEqual([{ secret: "fixture-secret-never-client" }]);
     expect(prepared.clientToolCallSlots).toEqual([]);
@@ -502,13 +515,13 @@ describe("prepareEmbeddedAttemptClientTools", () => {
       catalogRef,
       codeModeControlsEnabled: true,
     }).apply({ toolsAllow: ["llm-task"] });
-    expect(providerExec?.description).toContain(
-      "- llm_task { secret: string } -> { receipt: string }",
-    );
-    expect(providerExec?.description).not.toContain("- llm_task unknown -> ?");
+    // Restriction narrows the live catalog; the prompt stays byte-stable and
+    // keeps discovery guidance instead of re-embedding the allowed contract.
+    expect(providerExec?.description).toBe(initialExec?.description);
+    expect(providerExec?.description).not.toContain("llm_task");
     expect(providerExec?.description).not.toContain(trustedBinding?.callableName);
-    expect(providerExec?.description).not.toContain("skills.read(");
-    expect(providerExec?.description).not.toContain("skills.search(");
+    expect(providerExec?.description).toContain("skills.read(");
+    expect(providerExec?.description).toContain("skills.search(");
   });
 
   it("hides client tools behind the tool-search catalog when code mode is not engaged", () => {
@@ -526,7 +539,7 @@ describe("prepareEmbeddedAttemptClientTools", () => {
     expect(result.allCustomTools).toEqual([]);
   });
 
-  it("keeps registry descriptions current until catalog cleanup releases every wrapper", () => {
+  it("keeps every registry description copy stable and observer-free across catalog changes", () => {
     const catalogRef = createToolSearchCatalogRef();
     const catalogTools = [createStubTool("allowed_target"), createStubTool("removed_target")];
     const controls = createCodeModeTools({
@@ -567,37 +580,39 @@ describe("prepareEmbeddedAttemptClientTools", () => {
     }).apply({ toolsAllow: ["allowed_target"] });
 
     const refreshedRegistryExec = wrapToolDefinition(originalDefinition);
-    for (const tool of [
+    const copies = [
       originalExec,
       activityExec,
       originalDefinition,
       activeRegistryExec,
       refreshedRegistryExec,
-    ]) {
-      expect(tool.description).toContain("- allowed_target");
+    ];
+    for (const tool of copies) {
+      expect(tool.description).toBe(originalExec.description);
+      expect(tool.description).not.toContain("- allowed_target");
       expect(tool.description).not.toContain("- removed_target");
     }
+    // Catalog restriction no longer rewrites descriptions, so no observer is
+    // installed and none needs releasing on cleanup.
+    expect(catalogRef.onChange).toBeUndefined();
 
-    const expiredCatalogObserver = catalogRef.onChange!;
     clearToolSearchCatalog({ catalogRef });
     expect(catalogRef.current).toBeUndefined();
     expect(catalogRef.onChange).toBeUndefined();
 
-    for (const tool of [originalExec, activityExec, originalDefinition, activeRegistryExec]) {
+    for (const tool of copies) {
       tool.description = "released description";
     }
-    expiredCatalogObserver();
-    for (const tool of [originalExec, activityExec, originalDefinition, activeRegistryExec]) {
+    for (const tool of copies) {
       expect(tool.description).toBe("released description");
     }
 
     const postCleanupRegistryExec = wrapToolDefinition(originalDefinition);
     postCleanupRegistryExec.description = "released registry wrapper";
-    expiredCatalogObserver();
     expect(postCleanupRegistryExec.description).toBe("released registry wrapper");
   });
 
-  it("releases the previous description observer when a run catalog observer is replaced", () => {
+  it("keeps the exec description byte-stable when a run catalog is replaced", () => {
     const catalogRef = createToolSearchCatalogRef();
     const context = {
       config: CODE_MODE_CONFIG,
@@ -614,7 +629,6 @@ describe("prepareEmbeddedAttemptClientTools", () => {
     });
     const originalExec = first.tools.find((tool) => tool.name === "exec")!;
     const originalWrapper = wrapEmbeddedAttemptToolWithActivity(originalExec, "run");
-    const expiredCatalogObserver = catalogRef.onChange!;
 
     const replacementControls = createCodeModeTools(context);
     const replacement = applyCodeModeCatalog({
@@ -622,15 +636,15 @@ describe("prepareEmbeddedAttemptClientTools", () => {
       tools: [...replacementControls, createStubTool("replacement_target")],
     });
     const replacementExec = replacement.tools.find((tool) => tool.name === "exec")!;
-    expect(catalogRef.onChange).not.toBe(expiredCatalogObserver);
-    expect(replacementExec.description).toContain("- replacement_target");
+    expect(replacementExec.description).toBe(originalExec.description);
+    expect(replacementExec.description).not.toContain("- original_target");
+    expect(replacementExec.description).not.toContain("- replacement_target");
 
     originalExec.description = "released original description";
     originalWrapper.description = "released original wrapper";
-    expiredCatalogObserver();
     expect(originalExec.description).toBe("released original description");
     expect(originalWrapper.description).toBe("released original wrapper");
-    expect(replacementExec.description).toContain("- replacement_target");
+    expect(replacementExec.description).not.toContain("- replacement_target");
 
     clearToolSearchCatalog({ catalogRef });
   });

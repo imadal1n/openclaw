@@ -95,8 +95,15 @@ function createScenario() {
         codeModeControlsEnabled: true,
       }).apply({ toolsAllow: ["allowed_target"] });
       assert.ok(held);
+      // Restriction narrows the live catalog; the exec description stays
+      // byte-stable and catalog-independent, so every live copy keeps the
+      // original text and advertises no catalog tool names.
+      assert.deepEqual(
+        catalogRef.current?.entries.map((entry) => entry.name),
+        ["allowed_target"],
+      );
       for (const tool of [exec, definition, held, current()]) {
-        assert.match(tool.description, /- allowed_target/);
+        assert.doesNotMatch(tool.description, /- allowed_target/);
         assert.doesNotMatch(tool.description, /- removed_target/);
       }
     },

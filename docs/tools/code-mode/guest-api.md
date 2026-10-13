@@ -83,19 +83,20 @@ executor and remain bounded by the Code Mode execution and continuation limits.
 applies to interactive Code Mode and headless automation scripts.
 
 Every effective non-MCP tool is also installed as an async global function.
-The model-visible `exec` description includes a small set of final callable names
-selected by fixed rules, along with compact input hints and trusted declared output hints.
-Descriptions remain deferred so adversarial catalog prose cannot steer the
-model. When that index omits a tool, call `catalog.search(...)`; its results are
-callable functions.
+The model-visible `exec` description stays catalog-independent and byte-stable
+for the whole session; it never embeds callable names, input hints, declared
+output hints, or descriptions, so catalog drift cannot rewrite the provider
+tools array and adversarial catalog prose cannot steer the model. Resolve
+current names, schemas, and owners at runtime: call `catalog.search(...)` (its
+results are callable functions), handle `describe()`, or the `API.list`/`API.read`
+declaration files.
 
-The arrow in each quick-index line describes the callable function's value.
-`-> Array<{ id: string }>` is a declared output hint; `-> ?` is output unknown.
-For unknown outputs, return the value unchanged or return
+A handle's `describe()` reports whether its output is declared or unknown. For
+unknown outputs, return the value unchanged or return
 `await results.save(value)` for a bounded preview. Observe the raw value or
 preview before filtering or mapping in a later `exec`; do not feed guessed
 fields into dependent logic in the same program. This also applies when a
-declared-output read feeds a final `-> ?` call: return or save that final raw
+declared-output read feeds a final unknown-output call: return or save that final raw
 value without wrapping it in a guessed answer shape.
 
 `results.load(id)` returns a detached JSON copy for later cells in the current
@@ -158,7 +159,7 @@ original tool name when selecting a `$api` declaration. Use
 `(await API.read(handle.apiPath)).content` for the entire server's TypeScript
 declaration. Search also accepts the fully qualified `callableName`.
 `catalog.all()` continues to list only native and client handles; searching does
-not add remote tools to that list or to the trusted quick index.
+not add remote tools to that list or to the model-visible prompt.
 
 Full schema is loaded only on demand:
 
@@ -222,7 +223,7 @@ approvals, timeouts, hooks, and telemetry are unchanged. A handle includes
 `exec`: the generic nodes surface reserves `system.run` for the normal shell
 `exec` tool with a node host.
 
-Call quick-index globals directly, or use callable catalog handles when lookup
+Call discovered globals directly, or use callable catalog handles when lookup
 is needed:
 
 ```javascript

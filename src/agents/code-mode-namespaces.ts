@@ -1,5 +1,4 @@
 /** MCP namespace descriptors, API files, and their catalog-bound invocation runtime. */
-import { truncateUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
 import { tokTypes } from "acorn";
 import { isRecord } from "../../packages/normalization-core/src/record-coerce.js";
 import type { PluginToolMcpMeta } from "../plugins/tool-metadata.js";
@@ -251,11 +250,8 @@ function assignMcpNamespaceServerNames(
   return assignments;
 }
 
-function mcpNodeLabel(node: NonNullable<McpNamespaceServer["node"]>): string {
-  return truncateUtf16Safe((node.displayName?.trim() || node.id).replace(/\s+/gu, " "), 128);
-}
-
-// Prompt preparation needs the same server names without building tool scopes or schema docs.
+// Namespace runtime construction needs the same server names without building
+// tool scopes or schema docs.
 function createMcpNamespacePlan(catalog: readonly CodeModeNamespaceCatalogEntry[]) {
   const mcpEntries = catalog
     .filter((entry) => entry.source === "mcp" && entry.id && entry.mcp)
@@ -418,32 +414,6 @@ declare function log(message: string): void;
 // Cycle: for (let pass = 0; pass < 3; pass++) draft = await agents.run("Improve: " + draft);
 // Schema: const fact = await agents.run<{ answer: string }>("Research", { schema: { type: "object", properties: { answer: { type: "string" } }, required: ["answer"] } });
 `;
-
-export function describeCodeModeNamespacesForPrompt(
-  catalog?: readonly CodeModeNamespaceCatalogEntry[],
-): string {
-  if (!catalog) {
-    return "";
-  }
-  const plan = createMcpNamespacePlan(catalog);
-  if (!plan) {
-    return "";
-  }
-  const servers = [...plan.servers.values()]
-    .toSorted((a, b) => a.identifier.localeCompare(b.identifier))
-    .map((server) => {
-      const nodeLabel = server.node ? mcpNodeLabel(server.node) : undefined;
-      return `${server.identifier}${nodeLabel ? ` (node: ${nodeLabel})` : ""}`;
-    });
-  // Node-backed servers keep the gateway-style name when unique. Collisions
-  // use the existing node-id fragment prefix idiom, then a numeric suffix.
-  return [
-    "MCP namespace globals are available in code mode:",
-    "- MCP: MCP server tools grouped by server.",
-    `Read API files such as mcp/index.d.ts and mcp/<server>.d.ts for TypeScript-style MCP headers; visible servers: ${servers.join(", ")}. Node-backed name collisions use a sanitized node-id fragment prefix.`,
-    "Search native and MCP tools by task with catalog.search(query). MCP handles expose callableName, apiPath, and describe() for the exact header and schema. Call the handle or MCP.<server>.<tool>({ ...input }) with one object argument matching the header.",
-  ].join("\n");
-}
 
 function assertNamespacePathSegment(segment: string): void {
   if (

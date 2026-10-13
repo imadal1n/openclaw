@@ -584,8 +584,25 @@ describe("Code Mode swarm host bridge", () => {
 
   it.each([
     { name: "explicit opt-out", swarm: false, catalog: "native", allow: undefined, enabled: false },
-    { name: "missing spawn", swarm: true, catalog: "empty", allow: undefined, enabled: false },
-    { name: "MCP lookalike", swarm: true, catalog: "mcp", allow: undefined, enabled: false },
+    // Swarm guidance is config-conditioned and byte-stable; it stays in the
+    // prompt whenever swarm is enabled, hedged by "when this run permits
+    // spawning", even when this catalog cannot resolve the spawn capability.
+    {
+      name: "missing spawn",
+      swarm: true,
+      catalog: "empty",
+      allow: undefined,
+      enabled: false,
+      advertised: true,
+    },
+    {
+      name: "MCP lookalike",
+      swarm: true,
+      catalog: "mcp",
+      allow: undefined,
+      enabled: false,
+      advertised: true,
+    },
     {
       name: "execution denied",
       swarm: true,
@@ -597,10 +614,9 @@ describe("Code Mode swarm host bridge", () => {
   ])("preserves catalog guidance and enforces the guest surface for $name", async (testCase) => {
     const { swarm, catalog, allow, enabled } = testCase;
     const advertised = "advertised" in testCase ? testCase.advertised : enabled;
-    const harness = createCodeModeHarness();
-    if (swarm !== undefined) {
-      (harness.config as { tools: Record<string, unknown> }).tools.swarm = swarm;
-    }
+    // The exec description is fixed when the harness creates the control
+    // tools, so the swarm config must be in place before harness creation.
+    const harness = createCodeModeHarness(swarm !== undefined ? { tools: { swarm } } : undefined);
     const ctx = Object.assign(harness.ctx, { toolExecutionAllow: allow });
     const spawn =
       catalog === "mcp"

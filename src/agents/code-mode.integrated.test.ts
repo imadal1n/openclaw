@@ -66,7 +66,7 @@ describe("Code Mode guest execution", () => {
     expect(testing.resumingRunIds.size).toBe(0);
   });
 
-  it("keeps normalized, reserved, and colliding prompt names aligned with runtime", async () => {
+  it("keeps normalized, reserved, and colliding names aligned with runtime discovery", async () => {
     const targets = [
       pluginTool("llm-task", "Run an LLM task"),
       pluginTool("llm_task", "Run the exact-name task"),
@@ -114,9 +114,10 @@ describe("Code Mode guest execution", () => {
         expect.stringMatching(/^tool___openclawResult_[a-f0-9]{8}$/u),
       ]),
     );
+    expect(compacted.tools[0]?.description).not.toContain("Enabled async tool globals");
     for (const name of value.names) {
       expect(name.startsWith("__openclaw")).toBe(false);
-      expect(compacted.tools[0]?.description).toContain(`- ${name} `);
+      expect(compacted.tools[0]?.description).not.toContain(`- ${name} `);
     }
     expect(details).toMatchObject({ value: { encoding: "still works" } });
     expect(value.results).toEqual(

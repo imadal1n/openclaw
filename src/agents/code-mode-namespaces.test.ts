@@ -1,8 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  createCodeModeNamespaceRuntime,
-  describeCodeModeNamespacesForPrompt,
-} from "./code-mode-namespaces.js";
+import { createCodeModeNamespaceRuntime } from "./code-mode-namespaces.js";
 
 type McpCatalogEntry = NonNullable<Parameters<typeof createCodeModeNamespaceRuntime>[0]>[number];
 
@@ -35,7 +32,7 @@ function mcpCatalogEntry(params: {
 }
 
 describe("Code Mode MCP namespace model", () => {
-  it("describes server names without inspecting tool parameter schemas", () => {
+  it("builds server API files without inspecting tool parameter schemas eagerly", () => {
     const readProperties = vi.fn(() => ({ query: { type: "string" } }));
     const catalog = [
       mcpCatalogEntry({
@@ -49,7 +46,6 @@ describe("Code Mode MCP namespace model", () => {
       }),
     ];
 
-    expect(describeCodeModeNamespacesForPrompt(catalog)).toContain("visible servers: github.");
     expect(readProperties).not.toHaveBeenCalled();
     expect(
       createCodeModeNamespaceRuntime(catalog).apiFiles.find(
@@ -253,19 +249,5 @@ describe("Code Mode MCP namespace model", () => {
       );
     }
     expect(executeTool).not.toHaveBeenCalled();
-  });
-
-  it("does not split UTF-16 surrogate pairs in node display names at the 128-char boundary", () => {
-    const displayName = `${"a".repeat(127)}\uD83D\uDCF1`;
-    const catalog = [
-      mcpCatalogEntry({
-        id: "github__read_file",
-        node: { id: "node-1", displayName },
-      }),
-    ];
-    const prompt = describeCodeModeNamespacesForPrompt(catalog);
-
-    expect(prompt).toContain(`visible servers: github (node: ${"a".repeat(127)}).`);
-    expect(prompt).not.toContain("\uD83D");
   });
 });

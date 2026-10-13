@@ -78,8 +78,8 @@ read text, image, truncation, and optional-not-found outcomes; explicit edit
 change state plus diff/patch data; and apply-patch path summaries. Missing
 standard daily notes (`memory/YYYY-MM-DD.md`) return an optional `not_found`
 result even when `optional` is omitted; other missing paths throw unless
-`optional: true` is explicitly supplied. When the quick index declares the
-fields, one cell can compose discovery and delivery without a separate
+`optional: true` is explicitly supplied. When a handle's `describe()` declares
+the fields, one cell can compose discovery and delivery without a separate
 inspection turn:
 
 ```javascript
@@ -92,15 +92,15 @@ return await conversations_send({
 });
 ```
 
-The nested calls still use normal tool policy, hooks, and approvals. If a full
-contract is exact but too large for the bounded quick index, it remains
-available through the callable handle's `describe()` and the arrow stays
-`-> ?`.
+The nested calls still use normal tool policy, hooks, and approvals. The
+model-visible `exec` description never embeds these contracts; if a full
+contract is exact but too large for compact hints, it remains available through
+the callable handle's `describe()` and the API declaration files.
 
 Full native-tool declarations are also available on demand through
 `API.list("tools")` and `API.read("tools/<callableName>.d.ts")`, using the same
 final callable names as discovery. These declarations are generated from the
-effective input and trusted output schemas, not from the shortened quick index.
+effective input and trusted output schemas, not from shortened compact hints.
 Native listing entries contain paths; `bytes` is available after `API.read`
 generates the file. Files are not eagerly injected into every guest VM.
 Unknown outputs and unsupported schema leaves remain `unknown`; client schemas
@@ -123,7 +123,7 @@ The contract rules are strict:
 - Include every non-throwing success or error variant. Omit `outputSchema` when
   the tool has no stable structured result.
 - Close object layers with `{ additionalProperties: false }` for a complete
-  quick-index hint. Open, oversized, or otherwise partial schemas stay
+  compact hint. Open, oversized, or otherwise partial schemas stay
   available through handle `describe()` but do not enable one-turn field use.
 - OpenClaw compiles the schema before running the tool, then validates final
   `details` after normal tool hooks and before a catalog call returns. An
@@ -132,7 +132,7 @@ The contract rules are strict:
 - Compact hints follow fixed rules and size limits. Handle `describe()` exposes
   the full trusted schema when the compact hint is insufficient.
 - Installed plugin code is already trusted local code. Remote MCP and client
-  metadata remains untrusted and cannot opt into these quick-index hints.
+  metadata remains untrusted and cannot opt into trusted compact hints.
 
 See [Tool plugins](/plugins/tool-plugins#output-contracts) for plugin authoring
 details.
@@ -140,7 +140,7 @@ details.
 MCP catalog entries stay under the generated `MCP` namespace. Task-oriented
 `catalog.search(...)` also returns MCP handles that invoke the same namespace
 path and identify its declaration file. MCP entries remain absent from bare
-globals, `catalog.all()`, and the trusted quick index. TypeScript-style declaration
+globals, `catalog.all()`, and the model-visible prompt. TypeScript-style declaration
 files are available through the read-only `API` virtual file surface, so agents
 can inspect MCP signatures without adding MCP schemas to the prompt:
 

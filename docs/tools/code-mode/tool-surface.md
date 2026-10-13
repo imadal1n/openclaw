@@ -20,6 +20,12 @@ Execution-restricted background runs retain the admitted catalog descriptions
 for prompt reuse. Their execution permissions still apply to every call;
 restricted Swarm globals are not installed in the guest.
 
+The `exec` description is catalog-independent and byte-stable for the whole
+session. It never embeds catalog names, schemas, or the callable index, so
+catalog drift or an owner change cannot rewrite the provider-visible tools
+array. Current contracts are obtained at runtime through `catalog.search` /
+handle `describe()` / `API.list` only.
+
 Use `exec` for tool orchestration, data joining, loops, parallel nested calls,
 and structured transforms. Use `wait` only when `exec` returns a resumable
 `waiting` result.
@@ -285,7 +291,9 @@ normal tool execution. `catalog.search(...)` searches native and MCP capabilitie
 together and returns callable handles. MCP matches identify their final
 `MCP.<server>.<tool>` path and declaration file; invoking a handle uses that
 same namespace dispatcher. `catalog.all()` lists only native and client handles.
-Remote descriptions and schemas stay out of the trusted quick index.
+Remote descriptions and schemas stay out of the model-visible prompt; the
+`exec` description is catalog-independent and byte-stable, so current names,
+schemas, and owners are always resolved through live discovery.
 
 ## Tool Search interaction
 

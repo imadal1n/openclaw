@@ -196,11 +196,14 @@ export function createCodeModeHarness(
     codeModeSkills?: readonly CodeModeSkill[];
     codeMode?: CodeModeToolsConfig;
     forceRestartSafeTools?: boolean;
+    /** Additional `tools` config entries merged into the harness config. */
+    tools?: Record<string, unknown>;
   } = {},
 ) {
   const catalogRef = params.catalogRef ?? createToolSearchCatalogRef();
   const config = {
     tools: {
+      ...params.tools,
       codeMode:
         typeof params.codeMode === "object"
           ? { enabled: true, ...params.codeMode }

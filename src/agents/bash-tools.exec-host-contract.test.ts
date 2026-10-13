@@ -62,7 +62,7 @@ describe.each(["agent:main:main", "agent:main:subagent:child"])(
             tools: [...createCodeModeTools(ctx), direct!],
           });
           const signature = `host?: ${hosts.map((host) => JSON.stringify(host)).join(" | ")}`;
-          expect(tools[0]!.description).toContain(signature);
+          expect(tools[0]!.description).not.toContain(signature);
           const described = await new ToolSearchRuntime(
             ctx,
             resolveToolSearchConfig(ctx.config),

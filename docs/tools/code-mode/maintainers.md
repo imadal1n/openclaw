@@ -102,7 +102,7 @@ Run these against both executors when changing the runtime:
 6. Assert the model-visible tool list is `exec`, `wait`, plus only configured
    direct-only tools.
 7. In `exec`, call safe bare globals and assert normalized, reserved, and
-   colliding names match the quick index.
+   colliding names match runtime discovery (`catalog.search`/`API.list`).
 8. Search `catalog`, inspect handle metadata/`describe()`, and call
    OpenClaw/plugin/client handles without observing exact ids.
 9. In `exec`, call `API.list("mcp")` and `API.read("mcp/<server>.d.ts")` and

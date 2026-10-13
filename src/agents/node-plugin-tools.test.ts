@@ -446,7 +446,7 @@ describe("createNodePluginTools", () => {
       toolName: "search",
       operation: "tool",
     });
-    expect(compacted.tools[0]?.description).toContain("docs (node: Studio Node)");
+    expect(compacted.tools[0]?.description).not.toContain("docs (node: Studio Node)");
     const details = await runCodeMode(
       codeModeTools,
       `
@@ -592,9 +592,9 @@ describe("createNodePluginTools", () => {
       gatewayMcpTool("tickets"),
       ...createNodePluginTools({}),
     ]);
-    expect(compacted.tools[0]?.description).toContain(
-      "visible servers: nodeATickets (node: Node A), nodeBDocs (node: Node B), nodeCDocs (node: Node C), tickets",
-    );
+    // Server lists stay out of the prompt; API.list exposes them at runtime.
+    expect(compacted.tools[0]?.description).not.toContain("nodeATickets");
+    expect(compacted.tools[0]?.description).not.toContain("visible servers:");
 
     const details = await runCodeMode(
       codeModeTools,

@@ -65,13 +65,7 @@ function catalog(targets: AnyAgentTool[], directToolNames?: string[]) {
     tools: [...harness.tools, ...targets],
     directToolNames,
   });
-  return { ...harness, ...compacted, exec: compacted.tools[0]! };
-}
-
-function indexOf(description: string) {
-  const start = description.indexOf("Enabled async tool globals");
-  expect(start).toBeGreaterThanOrEqual(0);
-  return description.slice(start);
+  return { ...harness, ...compacted, exec: compacted.tools[0]!, wait: compacted.tools[1]! };
 }
 
 describe("Code Mode catalog and model-visible surface", () => {
@@ -91,9 +85,10 @@ describe("Code Mode catalog and model-visible surface", () => {
     expect(resultDetails(await read()).value).toEqual([]);
   });
 
-  it("removes shell-computation guidance when a client shadows the shell tool", () => {
-    const { ctx, exec } = catalog([fakeTool("exec", "Run shell command")]);
-    expect(exec.description).toContain("Use the shell tool `exec` for heavier computation");
+  it("keeps shell guidance discovery-based when a client shadows the shell tool", () => {
+    const { ctx, exec, catalogRef } = catalog([fakeTool("exec", "Run shell command")]);
+    expect(exec.description).toContain("heavier computation");
+    expect(exec.description).not.toContain("- exec unknown -> ?");
     addClientToolsToToolCatalog({
       enabled: true,
       ...ctx,
@@ -107,9 +102,14 @@ describe("Code Mode catalog and model-visible surface", () => {
         },
       ],
     });
-    expect(exec.description).toContain("- exec unknown -> ?");
-    expect(exec.description).not.toContain("heavier computation");
+    // The description never advertised the shell callable by name, so the
+    // mid-session client shadow cannot leave a stale contract in the prompt;
+    // the shadowed tool stays reachable through catalog.search.
+    expect(exec.description).toContain("heavier computation");
+    expect(exec.description).not.toContain("- exec unknown -> ?");
+    expect(exec.description).not.toContain("request: string");
     expect(exec.description).toContain("10000 ms wall-clock budget");
+    expect(catalogRef.current?.entries.map((entry) => entry.name)).toContain("exec");
   });
 
   it("keeps direct-only tools model-visible and out of the guest catalog", () => {
@@ -145,68 +145,43 @@ describe("Code Mode catalog and model-visible surface", () => {
     expect(catalogRef.current?.entries.map((entry) => entry.name)).toEqual(["message"]);
   });
 
-  it("primes the exec schema with resolvable callable contracts", () => {
+  it("keeps callable contracts behind runtime discovery instead of the prompt", async () => {
     const alpha = pluginTool("alpha_tool", "Another deferred description.");
     alpha.outputSchema = Type.Array(
       Type.Object({ id: Type.String(), score: Type.Number() }, { additionalProperties: false }),
     );
-    const { exec } = catalog([
+    const { exec, wait } = catalog([
       pluginTool("zeta_tool", "Description stays deferred."),
       alpha,
       { ...fakeTool("read", "Read file"), parameters: readToolInputSchema },
     ]);
-    expect(exec.description).toContain(
-      "- alpha_tool { value?: string } -> Array<{ id: string; score: number }>",
-    );
-    expect(exec.description).toContain("- zeta_tool { value?: string } -> ?");
-    expect(exec.description).toContain(
-      "- read { path: string; cursor?: number /* integer, >= 0 */; limit?: number; offset?: number /* integer, >= 1 */; optional?: true } -> ?",
-    );
-    expect(exec.description.indexOf("alpha_tool")).toBeLessThan(
-      exec.description.indexOf("zeta_tool"),
-    );
+    // The prompt never embeds catalog tool names, schemas, or descriptions, so
+    // mid-session catalog drift cannot advertise an obsolete contract.
+    expect(exec.description).not.toContain("alpha_tool");
+    expect(exec.description).not.toContain("zeta_tool");
+    expect(exec.description).not.toContain("Enabled async tool globals");
     expect(exec.description).not.toContain("Description stays deferred.");
     expect(exec.description).not.toContain("Another deferred description.");
     expect(exec.description).not.toContain("openclaw:fake-code-mode");
-    expect(exec.description).not.toContain("paired Gateway nodes");
-    expect(exec.description).not.toContain("MCP tools use the `MCP` namespace");
-  });
+    expect(exec.description).toContain("paired Gateway nodes");
+    expect(exec.description).toContain("MCP tools use the `MCP` namespace");
 
-  it("keeps declared-output tools indexed when truncation drops unknown-output lines", () => {
-    const pluginId = `fake-${"x".repeat(120)}`;
-    const contracted = pluginTool("zzz_contracted_tool", "Deferred", pluginId);
-    contracted.outputSchema = Type.Object({ ok: Type.Boolean() }, { additionalProperties: false });
-    const { exec } = catalog([
-      ...Array.from({ length: 500 }, (_, index) =>
-        pluginTool(`fake_${index.toString().padStart(3, "0")}`, "Deferred", pluginId),
-      ),
-      contracted,
-    ]);
-    const index = indexOf(exec.description);
-    expect(index).toContain("additional tools omitted");
-    expect(index).toContain("zzz_contracted_tool");
-    expect(index).toContain("-> { ok: boolean }");
-    expect(index.length).toBeLessThanOrEqual(8_000);
-  });
-
-  it("skips a single oversized entry instead of blanking the whole index", () => {
-    const names = [
-      `a_${"z".repeat(9_000)}`,
-      ...Array.from({ length: 4 }, (_, index) => `b_short_${index}`),
-    ];
-    const { exec } = catalog(
-      names.map((name) => {
-        const tool = pluginTool(name, "Deferred");
-        tool.outputSchema = Type.Object({ ok: Type.Boolean() }, { additionalProperties: false });
-        return tool;
-      }),
-    );
-    const index = indexOf(exec.description);
-    expect(index.length).toBeLessThanOrEqual(8_000);
-    expect(index).not.toContain("z".repeat(9_000));
-    for (const name of names.slice(1)) {
-      expect(index).toContain(name);
-    }
+    // Discovery still returns the current callable and its schema at runtime.
+    const details = await runUntilCompleted({
+      execTool: exec,
+      waitTool: wait,
+      code: `
+        const [tool] = await catalog.search("alpha_tool");
+        const described = await tool.describe();
+        return { callableName: tool.callableName, described };
+      `,
+    });
+    expect(details.status).toBe("completed");
+    expect(details.value).toMatchObject({
+      callableName: "alpha_tool",
+      described: { name: "alpha_tool", parameters: { type: "object" } },
+    });
+    expect(JSON.stringify(details.value)).toContain("score");
   });
 });
 
@@ -503,9 +478,11 @@ it.for(["transported", "skills_read", "skills_search", "shadowed", "revoked"] as
         });
         const exec = surface.tools.find((tool) => tool.name === "exec")!;
         const wait = surface.tools.find((tool) => tool.name === "wait")!;
-        expect(exec.description.includes("skills.search(")).toBe(denied !== "skills_search");
-        expect(exec.description.includes("skills.list(")).toBe(denied !== "skills_search");
-        expect(exec.description.includes("skills.read(")).toBe(denied !== "skills_read");
+        // Skill guidance is catalog-independent and byte-stable; denial is
+        // enforced at runtime, not by rewriting the prompt.
+        expect(exec.description.includes("skills.search(")).toBe(true);
+        expect(exec.description.includes("skills.list(")).toBe(true);
+        expect(exec.description.includes("skills.read(")).toBe(true);
         const pending = runUntilCompleted({
           execTool: exec,
           waitTool: wait,
